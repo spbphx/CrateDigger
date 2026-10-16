@@ -1,0 +1,6 @@
+yt-dlp[default]>=2026.1.29
+ytmusicapi>=1.10
+numpy>=1.26
+scipy>=1.11
+imageio-ffmpeg>=0.5
+deno>=2.0

@@ -1,0 +1,1010 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CrateDigger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --plastic:#EEF0EE; --panel:#FFFFFF; --ink:#23272E; --soft:#5F6670; --line:#D3D8D6;
+  --cobalt:#2F4BD8; --cobalt-ink:#FFFFFF; --warn:#B4442A; --ok:#2E7D4F;
+  --r-lg:14px; --r-sm:6px;
+  --f: "Archivo", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--plastic);color:var(--ink);font-family:var(--f);font-size:15px;line-height:1.45}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--cobalt);outline-offset:2px}
+.app{display:grid;grid-template-columns:380px 1fr;min-height:100vh}
+@media (max-width:900px){.app{grid-template-columns:1fr}}
+
+/* ---------- левая панель: прилавок */
+.counter{background:var(--panel);border-right:1px solid var(--line);padding:28px 26px 120px;position:sticky;top:0;height:100vh;overflow:auto}
+@media (max-width:900px){.counter{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line);padding-bottom:28px}}
+.brand{font-stretch:62%;font-weight:900;font-size:44px;line-height:.9;letter-spacing:-.5px;margin:0 0 4px}
+.tagline{font-size:14px;line-height:1.4;color:var(--soft);margin:10px 0 0}
+/* флажки языка в шапке */
+.langs{display:flex;gap:8px;margin:-8px 0 14px}
+.langs button{width:27px;height:18px;padding:0;border:1px solid rgba(0,0,0,.18);border-radius:3px;overflow:hidden;cursor:pointer;background:#fff;opacity:.45;filter:saturate(.35);transition:opacity .15s,filter .15s}
+.langs button:hover{opacity:.85;filter:none}
+.langs button[aria-pressed=true]{opacity:1;filter:none;box-shadow:0 0 0 2px var(--panel),0 0 0 4px var(--ink)}
+.langs svg{width:100%;height:100%;display:block}
+.ask{display:block;margin:26px 0 8px;font-weight:700;font-size:17px}
+.tags{width:100%;border:2px solid var(--ink);border-radius:var(--r-sm);padding:12px 14px;font-size:18px;background:#fff}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 4px}
+.chip{border:1px solid var(--line);background:var(--plastic);border-radius:999px;padding:4px 11px;font-size:13px;cursor:pointer}
+.chip:hover{border-color:var(--ink)}
+.hint{color:var(--soft);font-size:13px;margin:6px 0 0}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}
+.field label{display:block;font-size:13px;color:var(--soft);margin-bottom:4px}
+.field input,.field select{width:100%;border:1px solid var(--line);border-radius:var(--r-sm);padding:8px 10px;background:#fff}
+.seg{display:flex;border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden;background:#fff}
+.seg button{flex:1;border:0;background:none;padding:8px 4px;cursor:pointer;font-size:14px}
+.seg button[aria-pressed=true]{background:var(--ink);color:#fff}
+.seg button+button{border-left:1px solid var(--line)}
+.onlyrow{display:flex;align-items:center;gap:8px;margin-top:6px}
+.onlyrow .flabel{font-size:13px;color:var(--soft);white-space:nowrap}
+.onlyrow .seg{flex:1}
+#only button{font-size:13.5px;padding:8px 2px}
+.seg button:disabled{color:#a9afb5;cursor:not-allowed;background:repeating-linear-gradient(135deg,#fff 0 6px,#f3f4f3 6px 12px)}
+.pair{display:flex;align-items:center;gap:6px}.pair span{color:var(--soft)}
+.pair input{min-width:0;padding:8px 6px;text-align:center}
+details{margin-top:18px;border-top:1px solid var(--line);padding-top:12px}
+summary{cursor:pointer;font-weight:600}
+.check{display:flex;gap:8px;align-items:flex-start;margin-top:10px;font-size:14px}
+.check input{margin-top:3px}
+.check.rare{margin:10px 0 0;font-weight:600}
+.field .flabel{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--soft);margin-bottom:4px;cursor:pointer;width:max-content}
+.field .flabel input{width:auto;margin:0;padding:0;accent-color:var(--ink)}
+.pair.off input{opacity:.4}
+.go{margin-top:22px;width:100%;border:0;border-radius:var(--r-sm);background:var(--cobalt);color:var(--cobalt-ink);
+  font-weight:800;font-stretch:80%;font-size:22px;padding:14px;cursor:pointer}
+.go.stop{background:var(--ink)}
+.go:disabled{opacity:.5;cursor:default}
+.drop{margin-top:12px;border:2px dashed var(--line);border-radius:var(--r-sm);padding:14px;font-size:13.5px;color:var(--soft);text-align:center;cursor:pointer}
+.drop.over,.drop:hover{border-color:var(--cobalt);color:var(--ink)}
+.drop small{display:block;margin-top:6px;font-size:12.5px}
+/* повторный прогон: пластинку из списка тащат в левую колонку */
+.counter.take{background:#F2F4FF;box-shadow:inset 0 0 0 3px var(--cobalt)}
+.counter.take .drop{border-style:solid;border-color:var(--cobalt);background:#fff;color:var(--ink);font-weight:600}
+.sleeve[draggable=true],.rtitle[draggable=true]{cursor:grab}
+.record.dragsrc{opacity:.45}
+.loop[draggable=true] .lname{cursor:grab}
+.loop.dragout{opacity:.5}
+.fromdig{color:var(--soft);font-size:13px}
+.diag{margin-top:18px;font-size:12px;color:var(--soft)}
+.diag b{color:var(--warn);font-weight:600}
+
+/* ---------- правая часть: ящик */
+.crate{padding:28px 32px 140px;min-width:0}
+@media (max-width:600px){.crate{padding:20px 16px 140px}}
+.bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:18px}
+.bar h2{margin:0;font-stretch:75%;font-weight:800;font-size:28px;flex:1;min-width:200px;overflow-wrap:anywhere}
+.ghost{border:1px solid var(--line);background:var(--panel);border-radius:var(--r-sm);padding:7px 12px;cursor:pointer;font-size:14px}
+.ghost:hover{border-color:var(--ink)}
+select.ghost{max-width:260px}
+.progress{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);padding:14px 16px;margin-bottom:22px}
+.meter{height:6px;background:var(--plastic);border-radius:3px;overflow:hidden;margin:8px 0 6px}
+.meter i{display:block;height:100%;width:0;background:var(--cobalt);transition:width .4s}
+.cur{font-weight:600}
+.log{max-height:180px;overflow:auto;font-size:12.5px;color:var(--soft);white-space:pre-wrap;margin-top:8px;border-top:1px solid var(--line);padding-top:8px;font-variant-numeric:tabular-nums}
+.empty{border:2px dashed var(--line);border-radius:var(--r-lg);padding:56px 28px;text-align:center;color:var(--soft)}
+.empty strong{display:block;color:var(--ink);font-size:20px;margin-bottom:6px}
+
+.record{display:grid;grid-template-columns:96px 1fr;gap:18px;padding:20px 0;border-top:1px solid var(--line)}
+@media (max-width:600px){.record{grid-template-columns:64px 1fr;gap:12px}}
+.sleeve{width:96px;height:96px;border-radius:4px;background:#cfd5d3 center/cover no-repeat;position:relative;overflow:hidden}
+@media (max-width:600px){.sleeve{width:64px;height:64px}}
+.rtitle{margin:0;font-family:inherit;font-stretch:75%;font-weight:800;font-size:22px;line-height:1.1;overflow-wrap:anywhere}
+.rartist{color:var(--soft);margin:2px 0 10px;overflow-wrap:anywhere}
+.rartist a{color:inherit}
+.loops{display:flex;flex-direction:column;gap:8px}
+.loop{display:grid;grid-template-columns:44px minmax(180px,250px) 1fr auto;align-items:center;gap:12px;background:var(--panel);
+  border:1px solid var(--line);border-radius:10px;padding:8px 10px 8px 8px}
+.loop.compat{box-shadow:0 0 0 2px var(--hue) inset}
+.loop.playing{border-color:var(--ink)}
+@media (max-width:700px){.loop{grid-template-columns:44px 1fr auto}.loop canvas{grid-column:1/-1;order:5}}
+.play{width:44px;height:44px;border-radius:50%;border:2px solid var(--ink);background:#fff;cursor:pointer;display:grid;place-items:center}
+.play svg{width:16px;height:16px}
+.loop.playing .play{background:var(--ink);color:#fff}
+.lname{min-width:0}
+.big{font-stretch:62%;font-weight:900;font-size:30px;line-height:.95;display:flex;align-items:baseline;gap:6px}
+.keychip{display:inline-block;font-stretch:62%;font-weight:900;padding:0 6px;border-radius:4px;background:var(--hue);color:#fff}
+.small{font-size:12.5px;color:var(--soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.meta{font-size:12.5px;color:var(--soft);line-height:1.35;margin-top:2px}
+.small button{border:0;background:none;padding:0;color:var(--soft);cursor:pointer;text-decoration:underline dotted;font-size:12.5px}
+canvas.wave{width:100%;height:46px;display:block;cursor:pointer}
+.acts{display:flex;gap:4px}
+.icon{width:34px;height:34px;border-radius:8px;border:1px solid transparent;background:none;cursor:pointer;color:var(--soft);font-size:17px}
+.icon:hover{border-color:var(--line);color:var(--ink)}
+.icon.on{color:#C08A00}
+
+/* ---------- джем-панель */
+.jam{position:fixed;left:380px;right:0;bottom:0;background:var(--ink);color:#fff;padding:12px 28px;display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+@media (max-width:900px){.jam{left:0;padding:10px 16px}}
+.jam .tempo{font-stretch:62%;font-weight:900;font-size:30px;line-height:1;min-width:110px}
+.jam .tempo small{font-stretch:100%;font-weight:400;font-size:12px;opacity:.7;display:block}
+.jam label{font-size:13px;display:flex;gap:6px;align-items:center}
+.jam input[type=range]{width:90px}
+.jam label{white-space:nowrap}
+.jamhint{font-size:12.5px;opacity:.7;flex-basis:100%;order:9}
+@media (max-width:1700px){.jamhint{display:none}}
+@media (max-width:900px){.jamhint{display:none}.jam{gap:10px 16px}.jam .tempo{font-size:24px;min-width:90px}}
+.jam .ghost{background:transparent;color:#fff;border-color:#59606b}
+.toast{position:fixed;left:50%;bottom:112px;transform:translateX(-50%);background:var(--panel);color:var(--ink);border:1px solid var(--ink);padding:8px 14px;border-radius:8px;font-size:14px;display:none;gap:14px;align-items:center;max-width:calc(100vw - 32px);z-index:5}
+.toastbtn{border:0;background:none;color:var(--cobalt);font-weight:700;cursor:pointer;padding:0}
+.zip{margin-left:auto;border:0;border-radius:var(--r-sm);background:var(--cobalt);color:#fff;font-weight:800;font-stretch:85%;font-size:16px;padding:10px 16px;cursor:pointer}
+.zip:disabled{opacity:.45;cursor:default}
+.digsec{margin-bottom:12px}
+.dighead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;padding:26px 0 4px;border-bottom:2px solid var(--ink)}
+.dighead h3{margin:0;font-stretch:70%;font-weight:900;font-size:24px;overflow-wrap:anywhere}
+.dighead .when{color:var(--soft);font-size:14px;flex:1}
+.small-btn{font-size:13px;padding:4px 10px}
+.pending{color:var(--soft);padding:18px 0;margin:0}
+.icon svg{width:16px;height:16px;vertical-align:-2px}
+.icon.trash:hover{color:var(--warn)}
+@media (max-width:900px){.toast{bottom:190px}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="counter">
+    <div class="langs" role="group" aria-label="Язык / Language / Idioma">
+        <button data-lang="en" title="English" aria-label="English"><svg viewBox="0 0 60 40" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><clipPath id="ukc"><path d="M0,5 v30 h60 v-30z"/></clipPath><clipPath id="ukt"><path d="M30,20 h30 v15z v15 h-30z h-30 v-15z v-15 h30z"/></clipPath><rect width="60" height="40" fill="#012169"/><g clip-path="url(#ukc)"><path d="M0,5 L60,35 M60,5 L0,35" stroke="#fff" stroke-width="6"/><path d="M0,5 L60,35 M60,5 L0,35" clip-path="url(#ukt)" stroke="#C8102E" stroke-width="4"/></g><path d="M30,0 v40 M0,20 h60" stroke="#fff" stroke-width="10"/><path d="M30,0 v40 M0,20 h60" stroke="#C8102E" stroke-width="6"/></svg></button>
+        <button data-lang="ru" title="Русский" aria-label="Русский"><svg viewBox="0 0 9 6" preserveAspectRatio="none" aria-hidden="true"><rect width="9" height="2" fill="#fff"/><rect y="2" width="9" height="2" fill="#0039A6"/><rect y="4" width="9" height="2" fill="#D52B1E"/></svg></button>
+        <button data-lang="es" title="Español" aria-label="Español"><svg viewBox="0 0 3 2" preserveAspectRatio="none" aria-hidden="true"><rect width="3" height="2" fill="#AA151B"/><rect y=".5" width="3" height="1" fill="#F1BF00"/></svg></button>
+    </div>
+    <h1 class="brand">CrateDigger</h1>
+    <p class="tagline" data-i18n="tagline">Пластинки с YouTube Music, нарезанные в ровные лупы</p>
+
+    <label class="ask" for="tags" data-i18n="ask">Что ищем в ящике?</label>
+    <input id="tags" class="tags" placeholder="soul, rhodes, 1973" autocomplete="off">
+    <label class="check rare"><input type="checkbox" id="rare"><span data-i18n="rare">Искать редкие</span></label>
+    <div class="chips" id="chips"></div>
+    <p class="hint" data-i18n="tagsHint">Оставьте пустым — будут случайные пластинки</p>
+
+    <div class="row">
+      <div class="field"><label for="n_tracks" data-i18n="nTracks">Пластинок</label><input id="n_tracks" type="number" min="1" max="20" value="5"></div>
+      <div class="field"><label for="n_loops" data-i18n="nLoops">Лупов с каждой</label><input id="n_loops" type="number" min="1" max="8" value="3"></div>
+    </div>
+    <div class="field" style="margin-top:16px"><label data-i18n="barsLab">Длина лупа</label>
+      <div class="seg" id="bars"><button data-v="1" data-i18n="bar1">1 такт</button><button data-v="2" data-i18n="bar2">2 такта</button><button data-v="4" data-i18n="bar4">4 такта</button></div></div>
+    <div class="field" style="margin-top:16px"><label data-i18n="preferLab">Какие лупы искать</label>
+      <div class="seg" id="prefer"><button data-v="any" data-i18n="any">Любые</button><button data-v="breaks" data-i18n="breaks">Брейки</button><button data-v="melodic" data-i18n="melodic">Мелодия</button></div>
+      <div class="onlyrow"><span class="flabel" id="onlyLab" data-i18n="onlyLab">Только:</span>
+        <div class="seg" id="only" role="group" aria-labelledby="onlyLab"><button data-k="drums" data-i18n="k_drums">барабаны</button><button data-k="bass" data-i18n="k_bass">бас</button><button data-k="vocal" data-i18n="k_vocal">вокал</button><button data-k="pads" data-i18n="k_pads">пэды</button></div></div>
+      <p class="hint" id="preferHint" hidden></p></div>
+    <div class="row">
+      <div class="field"><label class="flabel" data-i18n-title="yearsTitle"><input type="checkbox" id="year_filter" checked onchange="syncFilters()"><span data-i18n="years">Годы</span></label><div class="pair" id="yearsPair"><input id="y0" type="number" min="1940" max="2025" value="1960"><span>–</span><input id="y1" type="number" min="1940" max="2025" value="1999"></div></div>
+      <div class="field"><label class="flabel" data-i18n-title="bpmTitle"><input type="checkbox" id="bpm_filter" checked onchange="syncFilters()">BPM</label><div class="pair" id="bpmPair"><input id="bpm_min" type="number" min="60" max="120" step="5" value="60"><span>–</span><input id="bpm_max" type="number" min="60" max="120" step="5" value="120"></div></div>
+    </div>
+    <div class="field" style="margin-top:16px"><label data-i18n="modeLab">Подгонка темпа до кратного 5</label>
+      <div class="seg" id="mode"><button data-v="stretch" data-i18n="stretch">Стретчинг</button><button data-v="vinyl" data-i18n="vinyl">Питчинг</button></div>
+      <p class="hint" id="modeHint"></p></div>
+
+    <details>
+      <summary data-i18n="more">Ещё настройки</summary>
+      <div class="field" style="margin-top:12px"><label for="formats" data-i18n="formatsLab">Какие файлы сохранять</label>
+        <select id="formats"><option value="stereo" data-i18n="fmtStereo">Только стерео 24 бит</option><option value="both" data-i18n="fmtBoth">Стерео 24 бит + моно 16 бит для Model:Samples</option><option value="mono" data-i18n="fmtMono">Только моно для Model:Samples</option></select></div>
+      <label class="check"><input type="checkbox" id="save_mp3" checked><span data-i18n="saveMp3">Сохранять исходный трек (нужен для повторного прогона)</span></label>
+      <label class="check"><input type="checkbox" id="sort_ms"><span data-i18n="sortMs">Разложить моно-файлы для Model:Samples по папкам: тональность, внутри — BPM</span></label>
+      <label class="check"><input type="checkbox" id="chops"><span data-i18n="chops">Нарезать каждый луп на 8 чопов</span></label>
+      <label class="check"><input type="checkbox" id="normalize" checked><span data-i18n="normalize">Выравнивать громкость лупов</span></label>
+      <label class="check"><input type="checkbox" id="strict_year"><span data-i18n="strictYear">Строго проверять год записи (меньше находок, зато без переизданий-«новоделов»)</span></label>
+      <div class="row">
+        <div class="field"><label for="title_len" data-i18n="titleLen">Длина названия в имени файла</label><input id="title_len" type="number" min="6" max="60" value="20"></div>
+        <div class="field"><label for="cookies_browser" data-i18n="cookiesLab">Cookies из браузера</label>
+          <select id="cookies_browser"><option value="" data-i18n="cookiesAuto">Автоматически</option><option value="firefox">Firefox</option><option value="chrome">Chrome</option><option value="edge">Edge</option><option value="safari">Safari</option><option value="brave">Brave</option><option value="opera">Opera</option></select></div>
+      </div>
+      <p class="hint" data-i18n="cookiesHint">Если YouTube спросит «подтвердите, что вы не бот», программа сама возьмёт cookies из Firefox (или другого браузера, где вы заходили на YouTube) и запомнит выбор. Лучше всего, если в Firefox вы вошли в свой аккаунт Google.</p>
+      <div class="field" style="margin-top:12px"><label for="out_dir" data-i18n="outDir">Папка для лупов</label>
+        <div class="pair"><input id="out_dir"><button class="ghost" id="saveDir" data-i18n="saveDir">Сохранить</button></div></div>
+    </details>
+
+    <button class="go" id="go" data-i18n="dig">Копать</button>
+    <div class="drop" id="drop" tabindex="0" role="button"><span id="dropText"></span><small id="dropSub" data-i18n="dropSub"></small><input type="file" id="pick" accept="audio/*,.flac,.aif,.aiff" multiple hidden></div>
+    <div class="diag" id="diag"></div>
+  </aside>
+
+  <main class="crate">
+    <div class="bar">
+      <h2 id="crateTitle"></h2>
+      <select class="ghost" id="history" data-i18n-aria="historyPh"><option value=""></option></select>
+      <button class="ghost" id="openDir" data-i18n="openDir">Открыть папку</button>
+      <button class="ghost" id="clearScreen" data-i18n="clearScreen">Очистить экран</button>
+    </div>
+    <div class="progress" id="progress" hidden>
+      <div class="cur" id="cur"></div>
+      <div class="meter"><i id="meter"></i></div>
+      <details id="logBox"><summary style="font-weight:400;font-size:13px" data-i18n="log">Журнал</summary><div class="log" id="log"></div></details>
+    </div>
+    <div id="records"></div>
+  </main>
+</div>
+
+<div class="jam" id="jam">
+  <div class="tempo" id="jamTempo"></div>
+  <label data-i18n-title="syncTitle"><input type="checkbox" id="syncRate" checked><span data-i18n="syncRate">Темп по первому лупу</span></label>
+  <label><span data-i18n="volume">Громкость</span> <input type="range" id="vol" min="0" max="1" step="0.01" value="0.85"></label>
+  <button class="ghost" id="stopAll" data-i18n="stopAll">Остановить всё</button>
+  <button class="zip" id="zipBtn" disabled data-i18n-title="zipTitle"></button>
+  <span class="jamhint" data-i18n="jamHint"></span>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const CHIPS = ["jungle","jazz funk","soul","library","bass","drum break","1972"];
+let logSince = 0, polling = null, lastStatus = "idle", scrollToNew = false, lastSnap = null, healthInfo = null;
+
+/* ------------ языки: русский, английский, испанский */
+const I18N = {
+ru: {
+  tagline:"Пластинки с YouTube Music, нарезанные в ровные лупы", ask:"Что ищем в ящике?", rare:"Искать редкие",
+  tagsHint:"Оставьте пустым — будут случайные пластинки", nTracks:"Пластинок", nLoops:"Лупов с каждой",
+  barsLab:"Длина лупа", bar1:"1 такт", bar2:"2 такта", bar4:"4 такта",
+  preferLab:"Какие лупы искать", any:"Любые", breaks:"Брейки", melodic:"Мелодия", onlyLab:"Только:",
+  k_drums:"барабаны", k_bass:"бас", k_vocal:"вокал", k_pads:"пэды",
+  onlyHint:"Лупы с одиночными инструментами (можно выбрать несколько, отбираются первые попавшиеся подходящие под один из выбранных типов)",
+  only4:"Только для лупов в 1 или 2 такта", onlyOff:"«Только …» работает с лупами в 1–2 такта — выключил",
+  years:"Годы", yearsTitle:"Выключите, чтобы искать записи любых лет", bpmTitle:"Выключите, чтобы не отбрасывать треки по темпу",
+  modeLab:"Подгонка темпа до кратного 5", stretch:"Стретчинг", vinyl:"Питчинг",
+  hintVinyl:"Темп меняется вместе с высотой, как ручкой pitch на вертушке или MPC",
+  hintStretch:"Темп меняется, высота остаётся прежней, удары стоят точно на своих местах. <b>Если слышны щелчки, попробуйте Питчинг</b>",
+  more:"Ещё настройки", formatsLab:"Какие файлы сохранять", fmtStereo:"Только стерео 24 бит",
+  fmtBoth:"Стерео 24 бит + моно 16 бит для Model:Samples", fmtMono:"Только моно для Model:Samples",
+  saveMp3:"Сохранять исходный трек (нужен для повторного прогона)",
+  sortMs:"Разложить моно-файлы для Model:Samples по папкам: тональность, внутри — BPM",
+  chops:"Нарезать каждый луп на 8 чопов", normalize:"Выравнивать громкость лупов",
+  strictYear:"Строго проверять год записи (меньше находок, зато без переизданий-«новоделов»)",
+  titleLen:"Длина названия в имени файла", cookiesLab:"Cookies из браузера", cookiesAuto:"Автоматически",
+  cookiesHint:"Если YouTube спросит «подтвердите, что вы не бот», программа сама возьмёт cookies из Firefox (или другого браузера, где вы заходили на YouTube) и запомнит выбор. Лучше всего, если в Firefox вы вошли в свой аккаунт Google.",
+  outDir:"Папка для лупов", saveDir:"Сохранить", folder:"Папка: {d}",
+  dig:"Копать", stop:"Остановить", stopping:"Останавливаю…",
+  dropText:"Или перетащите сюда свои mp3, wav, flac (например, рипы с винила) — нарежу их так же",
+  dropSub:"Пластинку из списка справа тоже можно перетащить сюда за обложку или название — прогоню её заново с текущими настройками",
+  dropRelease:"Отпустите где угодно в этой колонке — прогоню «{t}» заново: {s}",
+  crateEmpty:"Ящик пуст", onScreen:"На экране {n} {w}", historyPh:"Добавить прошлый ящик…",
+  favOption:"★ Избранное ({n} {w})", openDir:"Открыть папку", clearScreen:"Очистить экран",
+  starting:"Начинаю…", log:"Журнал", working:"Работаю…", stError:"Ошибка — подробности в журнале", stStopped:"Остановлено", stDone:"Готово",
+  emptyTitle:"Здесь появятся пластинки и лупы", emptyText:"Введите теги слева или оставьте поле пустым и нажмите «Копать». Новые копания добавляются вниз.",
+  nothingPlaying:"ничего не играет", playingN:"играет лупов: {n}", syncRate:"Темп по первому лупу",
+  syncTitle:"Следующие лупы подстраиваются под темп первого включённого", volume:"Громкость", stopAll:"Остановить всё",
+  zip:"Скачать все в ZIP", zipN:"Скачать все в ZIP ({n})", zipTitle:"Все лупы с экрана как есть, разложенные по папкам: BPM, внутри тональность",
+  zipBuilding:"Собираю ZIP…", zipFail:"Не получилось собрать ZIP", zipDone:"Скачано {n} {w} в {name}", zipMissing:", не нашёл файлов: {m}",
+  jamHint:"Можно включить несколько лупов — следующие вступят с начала такта. Пробел — стоп.",
+  waitDig:"Дождитесь окончания копания", needAudio:"Нужны аудиофайлы", uploading:"Загружаю {i} из {n}: {name}", uploadFail:"сбой загрузки",
+  rerunWait:"Дождитесь окончания копания и перетащите пластинку ещё раз", rerunning:"Прогоняю «{t}» заново: {s}",
+  onlyWhat:"только {list}", or:" или ",
+  favTitle:"★ Избранное", favWhen:"всё, что отмечено звёздочкой", randomDig:"Случайный ящик", myFiles:"Мои файлы", rerunDig:"Повтор: {t}",
+  removeDig:"Убрать ящик", removeDigTitle:"Убрать этот ящик с экрана (файлы останутся)",
+  plays:"{v} прослушиваний", listen:"слушать оригинал", fromDig:"из ящика «{t}», {w}",
+  dragTitle:"Перетащите в левую колонку, чтобы прогнать заново с другими настройками",
+  pending:"Копаем… первая пластинка появится примерно через полминуты.",
+  favOnTitle:"В Избранном — нажмите, чтобы убрать", favOffTitle:"В Избранное (копия ляжет в папку Favorites)", favAria:"Избранное",
+  favAdded:"В Избранном (копия — в папке Favorites)", favRemoved:"Убрано из Избранного",
+  favEmpty:"В Избранном пока пусто — отмечайте лупы звёздочкой ★", favAllShown:"Все избранные лупы уже на экране",
+  play:"Слушать {name}", pitch:"питч {v} пт", stretchPct:"стретч {v}%", noFit:"без подгонки",
+  kindOnly:"только {k}", kindMixed:"{k} с примесью", meta:"{bars} {bw}, {steps} {sw}, Camelot {cam}",
+  free:"без сетки, ровно {bars} {bw} под {bpm} BPM", was:"было {bpm} BPM, {st}", tuning:"строй {c} ц",
+  dragOut:"Перетащите луп в папку на компьютере — файл скопируется туда",
+  copyTitle:"Скопировать имя файла", copied:"Имя скопировано: {name}",
+  saveTitle:"Сохранить WAV на компьютер (если перетаскивание в папку не работает)", saveAria:"Сохранить файл",
+  saved:"Сохранено: {name}", downloaded:"{name} — в папке загрузок браузера", saveFail:"Не удалось сохранить файл",
+  trashTitle:"Убрать с экрана (файл останется в папке)", trashAria:"Убрать с экрана",
+  removed:"{name} убран с экрана", undo:"Вернуть", cleared:"Экран очищен — файлы остались в папке", openFail:"Не удалось открыть файл",
+  noYtdlp:"<b>yt-dlp не установлен</b> — запустите через start-файл", noDeno:"<b>нет Deno</b> — YouTube может не отдавать звук",
+  noFfmpeg:"<b>нет ffmpeg</b>", jsEngine:"JS-движок для YouTube",
+  million:"{n} млн", thousand:"{n} тыс.",
+  loops:["луп","лупа","лупов"], bars:["такт","такта","тактов"], steps:["шаг","шага","шагов"],
+},
+en: {
+  tagline:"Records from YouTube Music, chopped into tight loops", ask:"What are we digging for?", rare:"Look for rare ones",
+  tagsHint:"Leave empty for random records", nTracks:"Records", nLoops:"Loops per record",
+  barsLab:"Loop length", bar1:"1 bar", bar2:"2 bars", bar4:"4 bars",
+  preferLab:"What loops to look for", any:"Any", breaks:"Breaks", melodic:"Melody", onlyLab:"Only:",
+  k_drums:"drums", k_bass:"bass", k_vocal:"vocals", k_pads:"pads",
+  onlyHint:"Loops with a single instrument (you can pick several; the first parts that fit any of the chosen types are taken)",
+  only4:"Only for 1- or 2-bar loops", onlyOff:"“Only …” works with 1–2 bar loops — turned it off",
+  years:"Years", yearsTitle:"Turn off to search recordings from any year", bpmTitle:"Turn off to keep tracks of any tempo",
+  modeLab:"Tempo fit to a multiple of 5", stretch:"Stretching", vinyl:"Pitching",
+  hintVinyl:"Tempo and pitch change together, like the pitch fader on a turntable or an MPC",
+  hintStretch:"Tempo changes, pitch stays the same, hits land exactly in place. <b>If you hear clicks, try Pitching</b>",
+  more:"More settings", formatsLab:"Files to save", fmtStereo:"Stereo 24-bit only",
+  fmtBoth:"Stereo 24-bit + mono 16-bit for Model:Samples", fmtMono:"Mono for Model:Samples only",
+  saveMp3:"Keep the source track (needed to re-run)",
+  sortMs:"Sort mono files for Model:Samples into folders: key, then BPM",
+  chops:"Chop every loop into 8 slices", normalize:"Even out loop loudness",
+  strictYear:"Strict recording-year check (fewer finds, but no modern re-recordings)",
+  titleLen:"Title length in name", cookiesLab:"Browser cookies", cookiesAuto:"Automatic",
+  cookiesHint:"If YouTube asks you to confirm you're not a bot, the program takes cookies from Firefox (or another browser where you've used YouTube) by itself and remembers the choice. It works best if you're signed in to your Google account in Firefox.",
+  outDir:"Loops folder", saveDir:"Save", folder:"Folder: {d}",
+  dig:"Dig", stop:"Stop", stopping:"Stopping…",
+  dropText:"Or drop your own mp3, wav, flac here (vinyl rips, for example) — I'll chop them the same way",
+  dropSub:"You can also drag a record from the list on the right here by its cover or title — I'll re-run it with the current settings",
+  dropRelease:"Release anywhere in this column — I'll re-run “{t}”: {s}",
+  crateEmpty:"The crate is empty", onScreen:"{n} {w} on screen", historyPh:"Add a past crate…",
+  favOption:"★ Favorites ({n} {w})", openDir:"Open folder", clearScreen:"Clear screen",
+  starting:"Starting…", log:"Log", working:"Working…", stError:"Error — details in the log", stStopped:"Stopped", stDone:"Done",
+  emptyTitle:"Records and loops will appear here", emptyText:"Type tags on the left or leave the field empty and press “Dig”. New digs are added below.",
+  nothingPlaying:"nothing playing", playingN:"loops playing: {n}", syncRate:"Tempo from first loop",
+  syncTitle:"Loops you start next follow the tempo of the first one", volume:"Volume", stopAll:"Stop all",
+  zip:"Download all as ZIP", zipN:"Download all as ZIP ({n})", zipTitle:"All loops on screen as they are, sorted into folders: BPM, then key",
+  zipBuilding:"Building ZIP…", zipFail:"Couldn't build the ZIP", zipDone:"Downloaded {n} {w} to {name}", zipMissing:", files not found: {m}",
+  jamHint:"You can play several loops — the next ones come in at the top of the bar. Space stops everything.",
+  waitDig:"Wait until the dig is finished", needAudio:"Audio files needed", uploading:"Uploading {i} of {n}: {name}", uploadFail:"upload failed",
+  rerunWait:"Wait until the dig is finished and drag the record again", rerunning:"Re-running “{t}”: {s}",
+  onlyWhat:"{list} only", or:" or ",
+  favTitle:"★ Favorites", favWhen:"everything marked with a star", randomDig:"Random crate", myFiles:"My files", rerunDig:"Re-run: {t}",
+  removeDig:"Remove crate", removeDigTitle:"Remove this crate from the screen (files stay)",
+  plays:"{v} plays", listen:"listen to the original", fromDig:"from the crate “{t}”, {w}",
+  dragTitle:"Drag into the left column to re-run with other settings",
+  pending:"Digging… the first record shows up in about half a minute.",
+  favOnTitle:"In Favorites — click to remove", favOffTitle:"Add to Favorites (a copy goes to the Favorites folder)", favAria:"Favorite",
+  favAdded:"In Favorites (a copy is in the Favorites folder)", favRemoved:"Removed from Favorites",
+  favEmpty:"Favorites are empty so far — mark loops with the star ★", favAllShown:"All favorite loops are already on screen",
+  play:"Play {name}", pitch:"pitch {v} st", stretchPct:"stretch {v}%", noFit:"no fit needed",
+  kindOnly:"{k} only", kindMixed:"{k} with extras", meta:"{bars} {bw}, {steps} {sw}, Camelot {cam}",
+  free:"no grid, exactly {bars} {bw} at {bpm} BPM", was:"was {bpm} BPM, {st}", tuning:"tuning {c} ct",
+  dragOut:"Drag the loop into a folder on your computer — the file is copied there",
+  copyTitle:"Copy file name", copied:"Name copied: {name}",
+  saveTitle:"Save the WAV to your computer (if dragging into a folder doesn't work)", saveAria:"Save file",
+  saved:"Saved: {name}", downloaded:"{name} — in the browser's downloads folder", saveFail:"Couldn't save the file",
+  trashTitle:"Remove from screen (the file stays in the folder)", trashAria:"Remove from screen",
+  removed:"{name} removed from screen", undo:"Undo", cleared:"Screen cleared — files stay in the folder", openFail:"Couldn't open the file",
+  noYtdlp:"<b>yt-dlp is not installed</b> — launch via the start file", noDeno:"<b>no Deno</b> — YouTube may refuse to give audio",
+  noFfmpeg:"<b>no ffmpeg</b>", jsEngine:"JS engine for YouTube",
+  million:"{n}M", thousand:"{n}K",
+  loops:["loop","loops"], bars:["bar","bars"], steps:["step","steps"],
+},
+es: {
+  tagline:"Discos de YouTube Music cortados en loops exactos", ask:"¿Qué buscamos en la caja?", rare:"Buscar rarezas",
+  tagsHint:"Déjalo vacío para discos al azar", nTracks:"Discos", nLoops:"Loops por disco",
+  barsLab:"Duración del loop", bar1:"1 compás", bar2:"2 compases", bar4:"4 compases",
+  preferLab:"Qué loops buscar", any:"Cualquiera", breaks:"Breaks", melodic:"Melodía", onlyLab:"Solo:",
+  k_drums:"batería", k_bass:"bajo", k_vocal:"voz", k_pads:"pads",
+  onlyHint:"Loops con un solo instrumento (puedes elegir varios; se toman las primeras partes que encajen con alguno de los tipos elegidos)",
+  only4:"Solo para loops de 1 o 2 compases", onlyOff:"«Solo …» funciona con loops de 1–2 compases: lo he desactivado",
+  years:"Años", yearsTitle:"Desactívalo para buscar grabaciones de cualquier año", bpmTitle:"Desactívalo para no descartar pistas por tempo",
+  modeLab:"Ajuste de tempo a múltiplos de 5", stretch:"Stretching", vinyl:"Pitching",
+  hintVinyl:"El tempo cambia junto con la altura, como el pitch de un tocadiscos o una MPC",
+  hintStretch:"Cambia el tempo, la altura se mantiene y los golpes quedan exactamente en su sitio. <b>Si oyes clics, prueba Pitching</b>",
+  more:"Más ajustes", formatsLab:"Qué archivos guardar", fmtStereo:"Solo estéreo 24 bits",
+  fmtBoth:"Estéreo 24 bits + mono 16 bits para Model:Samples", fmtMono:"Solo mono para Model:Samples",
+  saveMp3:"Guardar la pista original (hace falta para reprocesar)",
+  sortMs:"Ordenar los archivos mono para Model:Samples en carpetas: tonalidad y, dentro, BPM",
+  chops:"Cortar cada loop en 8 chops", normalize:"Igualar el volumen de los loops",
+  strictYear:"Comprobar estrictamente el año de grabación (menos hallazgos, pero sin regrabaciones modernas)",
+  titleLen:"Longitud del título", cookiesLab:"Cookies del navegador", cookiesAuto:"Automático",
+  cookiesHint:"Si YouTube pide confirmar que no eres un bot, el programa toma solo las cookies de Firefox (u otro navegador donde hayas usado YouTube) y recuerda la elección. Funciona mejor si en Firefox has iniciado sesión con tu cuenta de Google.",
+  outDir:"Carpeta de loops", saveDir:"Guardar", folder:"Carpeta: {d}",
+  dig:"Excavar", stop:"Detener", stopping:"Deteniendo…",
+  dropText:"O suelta aquí tus mp3, wav, flac (por ejemplo, rips de vinilo): los corto igual",
+  dropSub:"También puedes arrastrar aquí un disco de la lista de la derecha por su portada o título: lo reproceso con los ajustes actuales",
+  dropRelease:"Suelta en cualquier parte de esta columna: reproceso «{t}»: {s}",
+  crateEmpty:"La caja está vacía", onScreen:"{n} {w} en pantalla", historyPh:"Añadir una caja anterior…",
+  favOption:"★ Favoritos ({n} {w})", openDir:"Abrir carpeta", clearScreen:"Limpiar pantalla",
+  starting:"Empezando…", log:"Registro", working:"Trabajando…", stError:"Error: detalles en el registro", stStopped:"Detenido", stDone:"Listo",
+  emptyTitle:"Aquí aparecerán los discos y los loops", emptyText:"Escribe etiquetas a la izquierda o deja el campo vacío y pulsa «Excavar». Las nuevas excavaciones se añaden abajo.",
+  nothingPlaying:"no suena nada", playingN:"loops sonando: {n}", syncRate:"Tempo del primer loop",
+  syncTitle:"Los siguientes loops siguen el tempo del primero que encendiste", volume:"Volumen", stopAll:"Parar todo",
+  zip:"Descargar todo en ZIP", zipN:"Descargar todo en ZIP ({n})", zipTitle:"Todos los loops en pantalla tal cual, ordenados en carpetas: BPM y, dentro, tonalidad",
+  zipBuilding:"Preparando ZIP…", zipFail:"No se pudo crear el ZIP", zipDone:"Descargados {n} {w} en {name}", zipMissing:", archivos no encontrados: {m}",
+  jamHint:"Puedes encender varios loops: los siguientes entran al inicio del compás. Espacio para parar.",
+  waitDig:"Espera a que termine la excavación", needAudio:"Hacen falta archivos de audio", uploading:"Subiendo {i} de {n}: {name}", uploadFail:"falló la subida",
+  rerunWait:"Espera a que termine la excavación y arrastra el disco otra vez", rerunning:"Reprocesando «{t}»: {s}",
+  onlyWhat:"solo {list}", or:" o ",
+  favTitle:"★ Favoritos", favWhen:"todo lo marcado con estrella", randomDig:"Caja al azar", myFiles:"Mis archivos", rerunDig:"Reproceso: {t}",
+  removeDig:"Quitar caja", removeDigTitle:"Quitar esta caja de la pantalla (los archivos se quedan)",
+  plays:"{v} reproducciones", listen:"escuchar el original", fromDig:"de la caja «{t}», {w}",
+  dragTitle:"Arrastra a la columna izquierda para reprocesar con otros ajustes",
+  pending:"Excavando… el primer disco aparecerá en medio minuto más o menos.",
+  favOnTitle:"En Favoritos: pulsa para quitarlo", favOffTitle:"A Favoritos (se guarda una copia en la carpeta Favorites)", favAria:"Favorito",
+  favAdded:"En Favoritos (hay una copia en la carpeta Favorites)", favRemoved:"Quitado de Favoritos",
+  favEmpty:"Favoritos está vacío por ahora: marca loops con la estrella ★", favAllShown:"Todos los loops favoritos ya están en pantalla",
+  play:"Escuchar {name}", pitch:"pitch {v} st", stretchPct:"stretch {v}%", noFit:"sin ajuste",
+  kindOnly:"solo {k}", kindMixed:"{k} con extras", meta:"{bars} {bw}, {steps} {sw}, Camelot {cam}",
+  free:"sin rejilla, {bars} {bw} exactos a {bpm} BPM", was:"era {bpm} BPM, {st}", tuning:"afinación {c} ct",
+  dragOut:"Arrastra el loop a una carpeta de tu ordenador: el archivo se copiará allí",
+  copyTitle:"Copiar el nombre del archivo", copied:"Nombre copiado: {name}",
+  saveTitle:"Guardar el WAV en tu ordenador (si arrastrar a una carpeta no funciona)", saveAria:"Guardar archivo",
+  saved:"Guardado: {name}", downloaded:"{name}: en la carpeta de descargas del navegador", saveFail:"No se pudo guardar el archivo",
+  trashTitle:"Quitar de la pantalla (el archivo se queda en la carpeta)", trashAria:"Quitar de la pantalla",
+  removed:"{name} quitado de la pantalla", undo:"Deshacer", cleared:"Pantalla limpia: los archivos siguen en la carpeta", openFail:"No se pudo abrir el archivo",
+  noYtdlp:"<b>yt-dlp no está instalado</b>: ábrelo con el archivo de inicio", noDeno:"<b>falta Deno</b>: YouTube puede no entregar el audio",
+  noFfmpeg:"<b>falta ffmpeg</b>", jsEngine:"Motor JS para YouTube",
+  million:"{n} M", thousand:"{n} mil",
+  loops:["loop","loops"], bars:["compás","compases"], steps:["paso","pasos"],
+}};
+const LANGS = ["en","ru","es"];
+let LANG = "ru";
+try{ const l = localStorage.getItem("cd_lang"); if(LANGS.includes(l)) LANG = l; }catch(e){}
+function t(key, vars){
+  let s = I18N[LANG][key] ?? I18N.ru[key] ?? key;
+  if(vars) s = s.replace(/\{(\w+)\}/g, (m,k)=> vars[k] ?? m);
+  return s;
+}
+function pl(n, key){                 // форма слова по числу: 1 луп, 2 лупа, 5 лупов / 1 loop, 2 loops
+  const f = I18N[LANG][key] || I18N.ru[key];
+  if(f.length===2) return n===1 ? f[0] : f[1];
+  const m10=n%10, m100=n%100;
+  return m10===1&&m100!==11 ? f[0] : m10>=2&&m10<=4&&(m100<10||m100>=20) ? f[1] : f[2];
+}
+function applyLang(){
+  document.documentElement.lang = LANG;
+  document.querySelectorAll("[data-i18n]").forEach(e=>e.textContent = t(e.dataset.i18n));
+  document.querySelectorAll("[data-i18n-title]").forEach(e=>e.title = t(e.dataset.i18nTitle));
+  document.querySelectorAll("[data-i18n-aria]").forEach(e=>e.setAttribute("aria-label", t(e.dataset.i18nAria)));
+  document.querySelectorAll(".langs button").forEach(b=>b.setAttribute("aria-pressed", b.dataset.lang===LANG));
+  if(!dragTrack) $("#dropText").textContent = t("dropText");
+  if($("#mode").dataset.value) seg("mode", $("#mode").dataset.value);
+  syncOnly();
+  $("#go").textContent = lastStatus==="running" ? t("stop") : t("dig");
+  if(lastSnap) $("#cur").textContent = curText(lastSnap); else $("#cur").textContent = t("starting");
+  localizeScreen(); updateCount(); updateJam(); renderDiag();
+  if(historyData) renderHistory();
+}
+function setLang(l){
+  if(!LANGS.includes(l) || l===LANG) return;
+  LANG = l;
+  try{ localStorage.setItem("cd_lang", l); }catch(e){}
+  applyLang();
+  api("/api/settings", {lang:l});         // журнал, ошибки и файлы ящика — на этом же языке
+}
+document.querySelectorAll(".langs button").forEach(b=>b.onclick = ()=>setLang(b.dataset.lang));
+
+/* ------------ форма */
+const KINDS = ["drums","bass","vocal","pads"];
+const kindName = k => t("k_"+k);
+const onlySel = new Set();      // «Только …» — можно несколько, работают как ИЛИ
+function seg(id, val){
+  const box = $("#"+id);
+  box.querySelectorAll("button").forEach(b=>{
+    b.setAttribute("aria-pressed", b.dataset.v==String(val));
+    b.onclick = ()=>{ if(id==="prefer") onlySel.clear(); seg(id, b.dataset.v); };   // первый ряд снимает «Только»
+  });
+  box.dataset.value = val;
+  if(id==="bars" || id==="prefer") syncOnly(id);
+  if(id==="mode") $("#modeHint").innerHTML = val==="vinyl" ? t("hintVinyl") : t("hintStretch");
+}
+$("#only").querySelectorAll("button").forEach(b=>b.onclick = ()=>{
+  onlySel.has(b.dataset.k) ? onlySel.delete(b.dataset.k) : onlySel.add(b.dataset.k);
+  syncOnly("only");
+});
+function syncOnly(changed){
+  const four = $("#bars").dataset.value==="4";
+  if(four && onlySel.size){
+    onlySel.clear();
+    if(changed==="bars") toast(t("onlyOff"));
+  }
+  $("#only").querySelectorAll("button").forEach(b=>{
+    b.disabled = four;
+    b.title = four ? t("only4") : "";
+    b.setAttribute("aria-pressed", onlySel.has(b.dataset.k));
+  });
+  const on = onlySel.size > 0;     // выбран хоть один «Только» — первый ряд выключен
+  $("#prefer").querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed", !on && b.dataset.v===$("#prefer").dataset.value));
+  const hint = $("#preferHint");
+  hint.hidden = !on;
+  hint.textContent = t("onlyHint");
+}
+function onlyList(){ return KINDS.filter(k=>onlySel.has(k)); }
+function syncFilters(){
+  for(const [chk, box] of [["year_filter","yearsPair"],["bpm_filter","bpmPair"]]){
+    const on = $("#"+chk).checked;
+    $("#"+box).classList.toggle("off", !on);
+    $("#"+box).querySelectorAll("input").forEach(i=>i.disabled=!on);
+  }
+}
+function addChip(c){
+  const inp = $("#tags"); const cur = inp.value.split(",").map(s=>s.trim()).filter(Boolean);
+  if(!cur.includes(c)) cur.push(c); inp.value = cur.join(", "); inp.focus();
+}
+CHIPS.forEach(c=>{const b=document.createElement("button");b.className="chip";b.textContent=c;b.onclick=()=>addChip(c);$("#chips").append(b)});
+
+function params(){
+  const v = id=>$("#"+id).value;
+  return {tags:v("tags"), n_tracks:+v("n_tracks"), n_loops:+v("n_loops"), bars:+$("#bars").dataset.value,
+    prefer:$("#prefer").dataset.value, only:onlyList(), mode:$("#mode").dataset.value, y0:+v("y0"), y1:+v("y1"),
+    bpm_min:+v("bpm_min"), bpm_max:+v("bpm_max"), formats:v("formats"),
+    save_mp3:$("#save_mp3").checked, chops:$("#chops").checked, normalize:$("#normalize").checked,
+    strict_year:$("#strict_year").checked, title_len:+v("title_len"), cookies_browser:v("cookies_browser"),
+    rare:$("#rare").checked, sort_ms:$("#sort_ms").checked,
+    year_filter:$("#year_filter").checked, bpm_filter:$("#bpm_filter").checked};
+}
+function fill(p){
+  for(const k of ["tags","n_tracks","n_loops","y0","y1","bpm_min","bpm_max","formats","title_len","cookies_browser"]) if(p[k]!==undefined) $("#"+k).value=p[k];
+  for(const k of ["save_mp3","chops","normalize","strict_year","rare","sort_ms","year_filter","bpm_filter"]) if(p[k]!==undefined) $("#"+k).checked=!!p[k];
+  syncFilters();
+  onlySel.clear(); (p.only||[]).forEach(k=>onlySel.add(k));
+  if(p.prefer==="drums"){ onlySel.add("drums"); p.prefer = "any"; }     // настройки версии 1.0
+  seg("bars", p.bars||2); seg("prefer", p.prefer||"any"); seg("mode", p.mode||"stretch");
+}
+const api = async (path, body) => {
+  const r = await fetch(path, body ? {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)} : {});
+  return r.json();
+};
+function toast(msg, actLabel, act){
+  const el=$("#toast"); el.textContent=msg;
+  if(actLabel){ const b=document.createElement("button"); b.textContent=actLabel; b.className="toastbtn";
+    b.onclick=()=>{ el.style.display="none"; act(); }; el.append(b); }
+  el.style.display="flex"; clearTimeout(el._t); el._t=setTimeout(()=>el.style.display="none", actLabel?6000:2400);
+}
+
+/* ------------ копание */
+$("#go").onclick = async ()=>{
+  if(lastStatus==="running"){                  // «Остановить» — окно сразу готово к новому копанию
+    $("#go").disabled=true; $("#go").textContent=t("stopping");
+    try{ await api("/api/stop",{}); }finally{ poll(); }
+    return;
+  }
+  const r = await api("/api/dig", params());
+  if(r.error){toast(r.error);return}
+  logSince = 0; $("#log").textContent = "";   // старые ящики остаются на экране
+  startPolling();
+};
+function startPolling(){ clearInterval(polling); polling = setInterval(poll, 800); poll(); }
+function curText(s){
+  if(s.status==="running") return s.current || t("working");
+  return s.status==="error" ? t("stError") : s.status==="stopped" ? t("stStopped") : (s.note || t("stDone"));
+}
+async function poll(){
+  let s; try{ s = await api("/api/state?since="+logSince); }catch(e){ return; }
+  lastStatus = s.status; lastSnap = s;
+  const running = s.status==="running";
+  $("#go").disabled = false;
+  $("#go").textContent = running ? t("stop") : t("dig");
+  $("#go").classList.toggle("stop", running);
+  if(s.status!=="idle") $("#progress").hidden = false;
+  $("#cur").textContent = curText(s);
+  $("#meter").style.width = (s.progress*100)+"%";
+  if(s.log.length){ const L=$("#log"); L.textContent += s.log.join("\n")+"\n"; L.scrollTop=L.scrollHeight; logSince = s.log_total; }
+  if(s.dig){ renderDig(s.dig, s.tracks, running);
+    if(scrollToNew){ scrollToNew = false; document.querySelector(`.digsec[data-dig="${CSS.escape(s.dig)}"]`)?.scrollIntoView({behavior:"smooth"}); } }
+  if(s.found_cookies) $("#cookies_browser").value = s.found_cookies;
+  if(!running && !s.busy){ clearInterval(polling); polling=null; loadHistory(); if(s.status==="error" || s.note) $("#logBox").open = true;
+    if(s.dig) renderDig(s.dig, s.tracks, false); }
+  else if(!running && !polling) startPolling();   // после «Стоп» дочитываем последние строки журнала
+}
+
+/* ------------ свои файлы */
+async function uploadAndCut(files){
+  if(lastStatus==="running"){toast(t("waitDig"));return}
+  files=[...files].filter(f=>/\.(mp3|wav|flac|aiff?|m4a|ogg|opus|webm|aac)$/i.test(f.name));
+  if(!files.length){toast(t("needAudio"));return}
+  $("#progress").hidden=false; const out=[];
+  for(const [i,f] of files.entries()){
+    $("#cur").textContent=t("uploading",{i:i+1, n:files.length, name:f.name});
+    const r=await fetch("/api/upload",{method:"POST",headers:{"X-Filename":encodeURIComponent(f.name)},body:f}).then(r=>r.json()).catch(()=>({error:t("uploadFail")}));
+    if(r.error){toast(r.error);continue} out.push(r);
+  }
+  if(!out.length) return;
+  const r=await api("/api/dig_local",{files:out,params:params()});
+  if(r.error){toast(r.error);return}
+  logSince=0;$("#log").textContent="";startPolling();
+}
+const drop=$("#drop");
+drop.onclick=()=>$("#pick").click();
+drop.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();$("#pick").click()}};
+$("#pick").onchange=e=>{uploadAndCut(e.target.files);e.target.value=""};
+document.addEventListener("dragover", e=>{
+  e.preventDefault();
+  if(dragLoop){ e.dataTransfer.dropEffect = "none"; return; }   // луп тащат наружу, в папку
+  if(dragTrack){                                   // пластинку из списка принимает вся левая колонка
+    const inside = counter.contains(e.target);
+    counter.classList.toggle("take", inside);
+    e.dataTransfer.dropEffect = inside ? "copy" : "none";
+  } else drop.classList.add("over");
+});
+document.addEventListener("dragleave", e=>{ if(!e.relatedTarget){ drop.classList.remove("over"); counter.classList.remove("take"); } });
+document.addEventListener("drop", e=>{
+  e.preventDefault(); drop.classList.remove("over");
+  if(dragLoop) return;
+  if(dragTrack){ const tr = dragTrack, inside = counter.contains(e.target); endTrackDrag(); if(inside) rerun(tr); return; }
+  if(e.dataTransfer?.files?.length) uploadAndCut(e.dataTransfer.files);
+});
+
+/* ------------ повторный прогон пластинки с текущими настройками */
+let dragTrack = null, dragLoop = false;
+const counter = $(".counter");
+function settingsLabel(){
+  const lab = id => $(`#${id} button[aria-pressed=true]`)?.textContent || "";
+  const what = onlySel.size ? t("onlyWhat", {list: onlyList().map(kindName).join(t("or"))}) : lab("prefer").toLowerCase();
+  return `${lab("mode")}, ${what}, ${lab("bars")}`;
+}
+function startTrackDrag(e, dig, tr, rec){
+  dragTrack = {dig, id:tr.id, title:tr.title};
+  e.dataTransfer.effectAllowed = "copy";
+  e.dataTransfer.setData("text/plain", `${tr.artist} — ${tr.title}`);
+  if(tr.thumb) e.dataTransfer.setDragImage(rec.querySelector(".sleeve"), 30, 30);
+  rec.classList.add("dragsrc");
+  $("#dropText").textContent = t("dropRelease", {t:tr.title, s:settingsLabel()});
+  $("#dropSub").hidden = true;
+}
+function endTrackDrag(){
+  dragTrack = null; counter.classList.remove("take");
+  document.querySelector(".record.dragsrc")?.classList.remove("dragsrc");
+  $("#dropText").textContent = t("dropText"); $("#dropSub").hidden = false;
+}
+async function rerun(tr){
+  if(lastStatus==="running"){ toast(t("rerunWait")); return; }
+  const r = await api("/api/rerun", {dig:tr.dig, id:tr.id, params:params()});
+  if(r.error){ toast(r.error); return; }
+  logSince = 0; $("#log").textContent = ""; scrollToNew = true;
+  toast(t("rerunning", {t:tr.title, s:settingsLabel()}));
+  startPolling();
+}
+
+/* ------------ экран: все ящики этой сессии подряд */
+const ICON_PLAY = '<svg viewBox="0 0 16 16"><path d="M4 2l10 6-10 6z" fill="currentColor"/></svg>';
+const ICON_STOP = '<svg viewBox="0 0 16 16"><rect x="3" y="3" width="10" height="10" fill="currentColor"/></svg>';
+const ICON_TRASH = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2h4l.5 1H14v1.5H2V3h3.5zM3.5 5.5h9l-.7 8.1a1 1 0 0 1-1 .9H5.2a1 1 0 0 1-1-.9z" fill="currentColor"/></svg>';
+const ICON_SAVE = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 2.5h8.6l2.4 2.4v8.6h-11z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M5 2.5v3.2h5V2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="5" y="9" width="6" height="4.5" rx=".5" fill="currentColor"/></svg>';
+const rendered = {};          // uid -> луп
+const hidden = new Set();     // uid убранных с экрана
+const uid = l => l.dig + "/" + l.name;
+const FAV = "★favorites";     // ящик «Избранное»: собирается из всех ящиков
+function hue(cam){ const n=parseInt(cam); return `hsl(${(n-1)*30} 62% ${cam.endsWith("A")?38:46}%)`; }
+function compatible(a,b){
+  const na=parseInt(a), nb=parseInt(b), la=a.slice(-1), lb=b.slice(-1);
+  if(na===nb) return true;
+  const d = Math.min((na-nb+12)%12, (nb-na+12)%12);
+  return la===lb && d===1;
+}
+function fmtViews(n){ return n>=1e6 ? t("million",{n:(n/1e6).toFixed(1).replace(/\.0$/,"")}) : n>=1000 ? t("thousand",{n:Math.floor(n/1000)}) : String(n); }
+function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+function digLabel(name, rerunTitle){
+  if(name===FAV) return {title:t("favTitle"), when:t("favWhen")};
+  const m = /^(\d{4})-(\d\d)-(\d\d)_(\d\d)-(\d\d)_(.*?)(?:_\d+)?$/.exec(name);
+  if(!m) return {title:name, when:""};
+  const tail = m[6]==="random" ? t("randomDig") : m[6]==="my-files" ? t("myFiles")
+    : m[6].startsWith("rerun-") ? t("rerunDig", {t: rerunTitle || m[6].slice(6).replace(/-/g," ")}) : m[6].replace(/-/g," ");
+  return {title: tail, when: `${m[3]}.${m[2]}, ${m[4]}:${m[5]}`};
+}
+function digSection(dig){
+  let sec = document.querySelector(`.digsec[data-dig="${CSS.escape(dig)}"]`);
+  if(sec) return sec;
+  $("#records .empty")?.remove();
+  sec = document.createElement("section"); sec.className = "digsec"; sec.dataset.dig = dig;
+  sec.innerHTML = `<div class="dighead"><h3></h3><span class="when"></span>
+    <button class="ghost small-btn"></button></div>
+    <div class="digbody"></div>`;
+  sec.querySelector(".small-btn").onclick = ()=>removeDig(dig);
+  fillDigHead(sec);
+  $("#records").append(sec);
+  return sec;
+}
+function fillDigHead(sec){             // тексты шапки ящика (и при смене языка)
+  const lab = digLabel(sec.dataset.dig, sec._rerunTitle);
+  sec.querySelector("h3").textContent = lab.title;
+  sec.querySelector(".when").textContent = lab.when;
+  const b = sec.querySelector(".small-btn"); b.textContent = t("removeDig"); b.title = t("removeDigTitle");
+  const p = sec.querySelector(".pending"); if(p) p.textContent = t("pending");
+}
+function renderDig(dig, tracks, running){
+  const sec = digSection(dig), body = sec.querySelector(".digbody");
+  body.querySelector(".pending")?.remove();
+  const have = new Set([...body.querySelectorAll(".record")].map(e=>e.dataset.id));
+  for(const tr of tracks){
+    const tdig = tr.dig || dig, rid = (tr.dig ? tr.dig+"|" : "") + tr.id;   // в Избранном пластинки из разных ящиков
+    const shown = tr.loops.map(l=>Object.assign(l,{dig:tdig})).filter(l=>!hidden.has(uid(l)));
+    if(have.has(rid)){ shown.forEach(l=>updateLoopFlags(l)); continue; }
+    const loops = shown.filter(l=>!document.querySelector(`.loop[data-uid="${CSS.escape(uid(l))}"]`));  // уже есть на экране
+    if(!loops.length) continue;
+    const rec = document.createElement("section"); rec.className="record"; rec.dataset.id=rid; rec._t = tr;
+    rec.innerHTML = `<div class="sleeve" style="${tr.thumb?`background-image:url('${esc(tr.thumb)}')`:""}"></div>
+      <div><h4 class="rtitle">${esc(tr.title)}</h4><p class="rartist"></p><div class="loops"></div></div>`;
+    const lbox = rec.querySelector(".loops");
+    for(const l of loops){ rendered[uid(l)] = l; lbox.append(loopRow(l)); }
+    if(tr.src || tr.url)                       // есть исходник или ссылка — можно прогнать заново
+      for(const h of [rec.querySelector(".sleeve"), rec.querySelector(".rtitle")]){
+        h.draggable = true;
+        h.ondragstart = e=>startTrackDrag(e, tdig, tr, rec);
+        h.ondragend = endTrackDrag;
+      }
+    fillRecord(rec);
+    body.append(rec);
+  }
+  if(/_rerun-/.test(dig) && tracks[0]){ sec._rerunTitle = tracks[0].title; fillDigHead(sec); }
+  if(running && !body.querySelector(".record"))
+    body.insertAdjacentHTML("beforeend", `<p class="pending">${esc(t("pending"))}</p>`);
+  if(!running && !body.querySelector(".record")) sec.remove();
+  updateCount();
+}
+function fillRecord(rec){              // подпись пластинки на текущем языке
+  const tr = rec._t;
+  rec.querySelector(".rartist").innerHTML = `${esc(tr.artist)}${tr.year?`, ${tr.year}`:""}${tr.views!=null?`, ${esc(t("plays",{v:fmtViews(tr.views)}))}`:""}${tr.url?` — <a href="${esc(tr.url)}" target="_blank" rel="noopener">${esc(t("listen"))}</a>`:""}${tr.dig?`<br><span class="fromdig">${esc(t("fromDig",{t:digLabel(tr.dig).title, w:digLabel(tr.dig).when}))}</span>`:""}`;
+  for(const h of [rec.querySelector(".sleeve"), rec.querySelector(".rtitle")]) if(h.draggable) h.title = t("dragTitle");
+}
+function localizeScreen(){             // смена языка: тексты на экране меняются на месте, игра не прерывается
+  document.querySelectorAll("#records .digsec").forEach(fillDigHead);
+  document.querySelectorAll("#records .record").forEach(fillRecord);
+  document.querySelectorAll("#records .loop").forEach(el=>{ const l = rendered[el.dataset.uid]; if(l) fillLoop(el, l); });
+  const e = $("#records .empty"); if(e) e.remove();
+}
+function updateLoopFlags(l, el){
+  el = el || document.querySelector(`.loop[data-uid="${CSS.escape(uid(l))}"]`); if(!el) return;
+  const b = el.querySelector(".fav");
+  b.classList.toggle("on", !!l.fav); b.setAttribute("aria-pressed", !!l.fav);
+  b.title = l.fav ? t("favOnTitle") : t("favOffTitle");
+}
+function fillLoop(el, l){              // все подписи лупа на текущем языке
+  const sg = v => (v>0?"+":"") + v;
+  const st = l.engine==="pitch" || l.engine==="varispeed"
+    ? t("pitch", {v: sg(l.pitch_st ? l.pitch_st : +(12*Math.log2(1+l.stretch_pct/100)).toFixed(2))})
+    : (l.stretch_pct ? t("stretchPct", {v:sg(l.stretch_pct)}) : t("noFit"));
+  const kind = l.kind || (l.drums ? "drums" : null);
+  const kindTxt = kind ? (l.mixed ? t("kindMixed",{k:kindName(kind)}) : t("kindOnly",{k:kindName(kind)})) + ", " : "";
+  const bw = pl(l.bars, "bars");
+  el.querySelector(".play").setAttribute("aria-label", t("play",{name:l.name}));
+  el.querySelector(".lname").title = t("dragOut");
+  el.querySelector(".copy").title = t("copyTitle");
+  el.querySelector(".meta").innerHTML = esc(kindTxt + t("meta",{bars:l.bars, bw, steps:l.steps, sw:pl(l.steps,"steps"), cam:l.camelot}))
+    + "<br>" + esc((l.free ? t("free",{bars:l.bars, bw, bpm:l.bpm}) : t("was",{bpm:l.real_bpm, st}))
+    + (Math.abs(l.tuning_cents||0)>=25 ? ", " + t("tuning",{c:(l.tuning_cents>0?"+":"")+Math.round(l.tuning_cents)}) : ""));
+  el.querySelector(".fav").setAttribute("aria-label", t("favAria"));
+  const sv = el.querySelector(".save"); sv.title = t("saveTitle"); sv.setAttribute("aria-label", t("saveAria"));
+  const tr = el.querySelector(".trash"); tr.title = t("trashTitle"); tr.setAttribute("aria-label", t("trashAria"));
+  updateLoopFlags(l, el);
+}
+function loopRow(l){
+  const el = document.createElement("div"); el.className="loop"; el.dataset.uid=uid(l);
+  el.style.setProperty("--hue", hue(l.camelot));
+  el.innerHTML = `<button class="play">${ICON_PLAY}</button>
+    <div class="lname"><div class="big"><span class="keychip">${esc(l.key)}</span>${l.bpm}</div>
+      <div class="small"><button class="copy">${esc(l.name)}</button></div>
+      <div class="meta"></div></div>
+    <canvas class="wave"></canvas>
+    <div class="acts"><button class="icon fav">★</button><button class="icon save">${ICON_SAVE}</button><button class="icon trash">${ICON_TRASH}</button></div>`;
+  el.querySelector(".play").onclick = ()=>toggleLoop(l, el);
+  el.querySelector(".wave").onclick = ()=>toggleLoop(l, el);
+  el.querySelector(".copy").onclick = ()=>{navigator.clipboard?.writeText(l.name); toast(t("copied",{name:l.name}))};
+  el.querySelector(".fav").onclick = async ()=>{
+    const r = await api("/api/fav",{dig:l.dig, name:l.name, on:!l.fav});
+    if(r.error){ toast(r.error); return; }
+    l.fav = r.fav; updateLoopFlags(l); loadHistory();
+    toast(r.fav ? t("favAdded") : t("favRemoved"));
+  };
+  el.querySelector(".save").onclick = ()=>saveLoop(l);
+  el.draggable = true;                    // файл лупа можно утащить в папку проводника / Finder
+  el.ondragstart = e=>{
+    if(e.target !== el) return;
+    dragLoop = true; el.classList.add("dragout");
+    e.dataTransfer.effectAllowed = "copy";
+    e.dataTransfer.setData("DownloadURL", `audio/wav:${l.name}.wav:${location.origin}${fileUrl(l)}`);
+  };
+  el.ondragend = ()=>{ dragLoop = false; el.classList.remove("dragout"); drop.classList.remove("over"); };
+  el.querySelector(".trash").onclick = ()=>trashLoop(l, el);
+  el.onmouseenter = ()=>highlight(l); el.onmouseleave = ()=>highlight(null);
+  fillLoop(el, l);
+  requestAnimationFrame(()=>drawWave(el.querySelector(".wave"), l.peaks, -1));
+  return el;
+}
+/* дискета: сохранить WAV лупа, когда перетаскивание в папку не работает.
+   Chrome/Edge спрашивают, куда сохранить (и помнят последнюю папку), остальные браузеры кладут в «Загрузки». */
+async function saveLoop(l){
+  const name = l.name + ".wav", url = fileUrl(l);
+  if(window.showSaveFilePicker){
+    let h = null;
+    try{
+      h = await window.showSaveFilePicker({suggestedName:name, id:"cratedigger-loops", startIn:"music",
+        types:[{description:"WAV", accept:{"audio/wav":[".wav"]}}]});
+    }catch(e){ if(e.name==="AbortError") return; }      // окно закрыли — ничего не делаем
+    if(h){
+      try{
+        const r = await fetch(url); if(!r.ok) throw new Error(r.status);
+        const w = await h.createWritable(); await r.body.pipeTo(w);
+        toast(t("saved",{name})); return;
+      }catch(e){ toast(t("saveFail")); return; }
+    }
+  }
+  const a = document.createElement("a"); a.href = url; a.download = name;
+  document.body.append(a); a.click(); a.remove();
+  toast(t("downloaded",{name}));
+}
+function trashLoop(l, el){
+  const id = uid(l);
+  stopLoop(id);
+  hidden.add(id); api("/api/session",{action:"hide",dig:l.dig,name:l.name});
+  const rec = el.closest(".record"), lbox = el.parentNode, next = el.nextSibling;
+  el.remove();
+  let recRemoved = false, recParent = rec.parentNode, recNext = rec.nextSibling;
+  if(!rec.querySelector(".loop")){ rec.remove(); recRemoved = true; }
+  updateCount();
+  toast(t("removed",{name:l.name}), t("undo"), ()=>{
+    hidden.delete(id); api("/api/session",{action:"unhide",dig:l.dig,name:l.name});
+    if(recRemoved) recParent.insertBefore(rec, recNext);
+    lbox.insertBefore(el, next && next.parentNode===lbox ? next : null);
+    fillLoop(el, l); fillRecord(rec);
+    requestAnimationFrame(()=>drawWave(el.querySelector(".wave"), l.peaks, -1));
+    updateCount();
+  });
+}
+function removeDig(dig){
+  const sec = document.querySelector(`.digsec[data-dig="${CSS.escape(dig)}"]`); if(!sec) return;
+  sec.querySelectorAll(".loop").forEach(e=>stopLoop(e.dataset.uid));
+  sec.remove(); api("/api/session",{action:"remove_dig",dig}); updateCount();
+}
+function visibleLoops(){ return [...document.querySelectorAll("#records .loop")].map(e=>rendered[e.dataset.uid]).filter(Boolean); }
+function updateCount(){
+  const n = visibleLoops().length;
+  $("#crateTitle").textContent = n ? t("onScreen",{n, w:pl(n,"loops")}) : t("crateEmpty");
+  $("#zipBtn").textContent = n ? t("zipN",{n}) : t("zip");
+  $("#zipBtn").disabled = !n;
+  if(!document.querySelector("#records .digsec") && !$("#records .empty"))
+    $("#records").innerHTML = `<div class="empty"><strong>${esc(t("emptyTitle"))}</strong>${esc(t("emptyText"))}</div>`;
+}
+function highlight(l){
+  document.querySelectorAll(".loop").forEach(e=>{
+    const o = rendered[e.dataset.uid];
+    e.classList.toggle("compat", !!(l && o && o!==l && compatible(l.camelot,o.camelot)));
+  });
+}
+function drawWave(cv, peaks, pos){
+  const dpr = devicePixelRatio||1, w = cv.clientWidth, h = cv.clientHeight; if(!w) return;
+  if(cv.width!==w*dpr){cv.width=w*dpr; cv.height=h*dpr;}
+  const g = cv.getContext("2d"); g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,w,h);
+  const css = getComputedStyle(cv.closest(".loop")).getPropertyValue("--hue");
+  const n = peaks.length, bw = w/n;
+  for(let i=0;i<n;i++){
+    const v = Math.max(1, peaks[i]*(h/2-2));
+    g.fillStyle = (pos>=0 && i/n<=pos) ? "#23272E" : css;
+    g.fillRect(i*bw, h/2-v, Math.max(1,bw-0.6), v*2);
+  }
+  g.fillStyle="rgba(35,39,46,.25)";       // сетка долей
+  const loop = rendered[cv.closest(".loop").dataset.uid], beats = loop ? loop.beats : 8;
+  for(let b=1;b<beats;b++){ const x=Math.round(b/beats*w); g.fillRect(x,b%4?h-5:0,1,b%4?5:h); }
+}
+let historyData = null;
+async function loadHistory(){ historyData = await api("/api/digs"); renderHistory(); }
+function renderHistory(){
+  const r = historyData;
+  $("#history").innerHTML = `<option value="">${esc(t("historyPh"))}</option>`
+    + `<option value="${FAV}">${esc(t("favOption",{n:r.favs, w:pl(r.favs,"loops")}))}</option>`
+    + r.digs.map(d=>`<option value="${esc(d.name)}">${esc(d.name)} (${d.loops} ${pl(d.loops,"loops")})</option>`).join("");
+}
+async function showFavorites(){
+  const old = document.querySelector(`.digsec[data-dig="${CSS.escape(FAV)}"]`);
+  if(old){ old.querySelectorAll(".loop").forEach(e=>stopLoop(e.dataset.uid)); old.remove(); }  // обновить
+  const m = await api("/api/favorites");
+  if(!m.tracks.length){ toast(t("favEmpty")); updateCount(); return; }
+  await api("/api/session",{action:"add",dig:FAV});
+  renderDig(FAV, m.tracks, false);
+  const sec = document.querySelector(`.digsec[data-dig="${CSS.escape(FAV)}"]`);
+  if(sec) sec.scrollIntoView({behavior:"smooth"});
+  else toast(t("favAllShown"));
+}
+$("#history").onchange = async e=>{
+  const name = e.target.value; e.target.value = ""; if(!name) return;
+  if(name===FAV) return showFavorites();
+  const m = await api("/api/dig?name="+encodeURIComponent(name));
+  if(m.error){toast(m.error);return}
+  await api("/api/session",{action:"add",dig:name});
+  renderDig(name, m.tracks||[], false);
+  document.querySelector(`.digsec[data-dig="${CSS.escape(name)}"]`)?.scrollIntoView({behavior:"smooth"});
+};
+$("#clearScreen").onclick = ()=>{
+  if(!document.querySelector("#records .digsec")) return;
+  Object.keys(voices).forEach(stopLoop);
+  document.querySelectorAll("#records .digsec").forEach(e=>e.remove());
+  hidden.clear(); api("/api/session",{action:"clear"}); updateCount();
+  toast(t("cleared"));
+};
+$("#openDir").onclick = ()=>api("/api/open",{});
+$("#saveDir").onclick = async ()=>{ const r=await api("/api/settings",{out_dir:$("#out_dir").value}); toast(r.error||t("folder",{d:r.out_dir})); loadHistory(); };
+
+/* ------------ ZIP для Model:Samples: <BPM>/<тональность>/<луп>.wav */
+$("#zipBtn").onclick = async ()=>{
+  const items = visibleLoops().map(l=>({dig:l.dig, name:l.name}));
+  if(!items.length) return;
+  const btn = $("#zipBtn"); btn.disabled = true; btn.textContent = t("zipBuilding");
+  try{
+    const r = await fetch("/api/zip",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({items})});
+    if(!r.ok){ const e = await r.json().catch(()=>({})); toast(e.error||t("zipFail")); return; }
+    const blob = await r.blob();
+    const name = (/filename="([^"]+)"/.exec(r.headers.get("Content-Disposition")||"")||[])[1] || "CrateDigger_ModelSamples.zip";
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.append(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 60000);
+    const miss = +(r.headers.get("X-Missing")||0), got = +(r.headers.get("X-Loops")||0);
+    toast(t("zipDone",{n:got, w:pl(got,"loops"), name}) + (miss ? t("zipMissing",{m:miss}) : ""));
+  }catch(e){ toast(t("zipFail")); }
+  finally{ updateCount(); }
+};
+
+/* ------------ плеер и джем */
+let ctx=null, gain=null; const buffers={}, voices={};
+function audio(){ if(!ctx){ ctx=new (window.AudioContext||window.webkitAudioContext)(); gain=ctx.createGain(); gain.gain.value=+$("#vol").value; gain.connect(ctx.destination);} return ctx; }
+$("#vol").oninput = e=>{ if(gain) gain.gain.value=+e.target.value; };
+function fileUrl(l){             // тот же файл, что играет на экране и ложится в ZIP
+  const f = l.files.stereo || l.files.mono;
+  return "/files/"+encodeURIComponent(l.dig)+"/"+f.split("/").map(encodeURIComponent).join("/");
+}
+async function getBuf(l){
+  if(buffers[uid(l)]) return buffers[uid(l)];
+  const r = await fetch(fileUrl(l));
+  if(!r.ok) throw new Error("404");
+  return buffers[uid(l)] = await audio().decodeAudioData(await r.arrayBuffer());
+}
+function master(){ const v=Object.values(voices); return v.length ? v.reduce((a,b)=>a.t0<b.t0?a:b) : null; }
+async function toggleLoop(l, el){
+  if(voices[uid(l)]){ stopLoop(uid(l)); return; }
+  let buf; try{ buf = await getBuf(l); }catch(e){ toast(t("openFail")); return; }
+  const c = audio(); if(c.state==="suspended") await c.resume();
+  const m = master();
+  const src = c.createBufferSource(); src.buffer = buf; src.loop = true;
+  let rate = 1, t0 = c.currentTime + 0.03;
+  if(m){
+    if($("#syncRate").checked) rate = m.bpm / l.bpm;
+    const bar = 4*60/m.bpm;                                    // длина такта мастера
+    t0 = m.t0 + Math.ceil((c.currentTime + 0.03 - m.t0)/bar)*bar;
+  }
+  src.playbackRate.value = rate; src.connect(gain); src.start(t0);
+  voices[uid(l)] = {src, t0, bpm: m ? m.bpm : l.bpm, rate, dur: buf.duration/rate, el, l};
+  el.classList.add("playing"); el.querySelector(".play").innerHTML = ICON_STOP;
+  updateJam(); tick();
+}
+function stopLoop(id){
+  const v = voices[id]; if(!v) return;
+  try{ v.src.stop(); }catch(e){}
+  delete voices[id];
+  v.el.classList.remove("playing"); v.el.querySelector(".play").innerHTML = ICON_PLAY;
+  drawWave(v.el.querySelector(".wave"), v.l.peaks, -1); updateJam();
+}
+$("#stopAll").onclick = ()=>Object.keys(voices).forEach(stopLoop);
+document.addEventListener("keydown", e=>{ if(e.code==="Space" && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)){ e.preventDefault(); Object.keys(voices).forEach(stopLoop);} });
+function updateJam(){
+  const m = master(), n = Object.keys(voices).length;
+  $("#jamTempo").innerHTML = m ? `${m.bpm} BPM <small>${esc(t("playingN",{n}))}</small>` : `— <small>${esc(t("nothingPlaying"))}</small>`;
+}
+let raf=null;
+function tick(){
+  if(raf) return;
+  const step = ()=>{
+    raf=null; if(!Object.keys(voices).length) return;
+    for(const v of Object.values(voices)){
+      const tt = ctx.currentTime - v.t0; const pos = tt<0 ? -1 : (tt % v.dur)/v.dur;
+      drawWave(v.el.querySelector(".wave"), v.l.peaks, pos);
+    }
+    raf = requestAnimationFrame(step);
+  };
+  raf = requestAnimationFrame(step);
+}
+window.addEventListener("resize", ()=>document.querySelectorAll(".loop").forEach(e=>{const l=rendered[e.dataset.uid]; if(l) drawWave(e.querySelector(".wave"), l.peaks, -1)}));
+function renderDiag(){
+  const h = healthInfo; if(!h) return;
+  const w = [];
+  if(!h.yt_dlp) w.push(t("noYtdlp"));
+  if(!h.js) w.push(t("noDeno"));
+  if(!h.ffmpeg) w.push(t("noFfmpeg"));
+  $("#diag").innerHTML = (w.length? w.join("<br>")+"<br>" : "") + `yt-dlp ${esc(h.yt_dlp||"—")}, ${esc(t("jsEngine"))}: ${esc(h.js||"—")}`;
+}
+
+/* ------------ старт */
+applyLang();
+(async ()=>{
+  const s = await api("/api/settings");
+  if(LANGS.includes(s.lang)){                       // язык, выбранный флажком (общий для всех окон)
+    if(s.lang!==LANG){ LANG = s.lang; try{ localStorage.setItem("cd_lang", LANG); }catch(e){} }
+  } else {                                          // первый запуск: язык браузера
+    let first = LANG;
+    try{ if(!localStorage.getItem("cd_lang")){ const nl = (navigator.language||"ru").slice(0,2).toLowerCase(); first = LANGS.includes(nl) ? nl : "en"; } }catch(e){}
+    LANG = first; api("/api/settings", {lang:LANG});
+  }
+  fill(Object.assign({}, s.defaults, s.last||{}));
+  $("#out_dir").value = s.out_dir;
+  applyLang();
+  loadHistory();
+  healthInfo = await api("/api/health"); renderDiag();
+  const ses = await api("/api/session");          // что было на экране до перезагрузки окна
+  ses.hidden.forEach(h=>hidden.add(h));
+  for(const d of ses.digs) renderDig(d.name, d.tracks, d.running);
+  updateCount();
+  const st = await api("/api/state");
+  if(st.status==="running"){ logSince = 0; startPolling(); }
+})();
+</script>
+</body>
+</html>

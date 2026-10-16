@@ -1,0 +1,14 @@
+# личные настройки и cookies — не выкладывать
+settings.json
+cookies.txt
+*.cookies
+
+# окружение Python, которое start-файлы ставят сами
+.venv/
+__pycache__/
+*.pyc
+
+# мусор систем
+.DS_Store
+Thumbs.db
+desktop.ini
