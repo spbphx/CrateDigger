@@ -1,13 +1,16 @@
 """
-Звуковой движок CrateDigger: только numpy + scipy + ffmpeg.
+Sound engine of CrateDigger: only numpy + scipy + ffmpeg.
 
-Что умеет:
-  * декодировать любой аудиофайл через ffmpeg
-  * находить темп и сетку долей (beat tracking, динамическое программирование)
-  * находить сильную долю такта (downbeat)
-  * определять тональность (хрома + профили Крумхансла, с поправкой на строй пластинки)
-  * выбирать самые «закольцовываемые» куски трека
-  * растягивать луп до темпа, кратного 5 BPM, и резать его с точностью до сэмпла
+What it does:
+  * decodes any audio file through ffmpeg
+  * finds the tempo and the beat grid (beat tracking, dynamic programming)
+  * finds the downbeat (the first beat of the bar)
+  * detects the key (chroma + Krumhansl profiles, corrected for the tuning of the record)
+  * picks the most "loopable" spans of the track
+  * fits a loop to a tempo that is a multiple of 5 BPM and cuts it with sample accuracy
+
+Time units: t / t0 / t1 are seconds in the source track, s / e are beat indices in beat_times,
+P0 / P1 / a / b are sample positions at SR (48 kHz).
 """
 from __future__ import annotations
 
@@ -27,13 +30,13 @@ from . import iso, spec
 from .spec import stft_mag
 from .i18n import T
 
-# «Только барабаны» — луп должен пройти все проверки сразу:
-DRUM_PITCHED_MAX = 0.035  # кадров с гармоническим рядом (бас, клавиши, голос, гитара, духовые) — почти ноль
-DRUM_PITCHED_RUN = 1      # и ни одной серии таких кадров подряд (ловит короткие стабы)
-DRUM_GAP_DB = 15.0        # громкость между ударами проваливается минимум на столько дБ (в басу и серединах)
-DRUM_TONAL_MAX = 0.30     # и общая «нотность» спектра низкая
-SR = 48000            # рабочая частота (Model:Samples тоже 48 кГц)
-ASR = 24000           # частота для анализа
+# "Drums only" — a loop must pass all of these checks at once:
+DRUM_PITCHED_MAX = 0.035  # frames with a harmonic series (bass, keys, voice, guitar, horns) — almost none
+DRUM_PITCHED_RUN = 1      # and not a single run of such frames in a row (catches short stabs)
+DRUM_GAP_DB = 15.0        # loudness between hits drops by at least this many dB (in the lows and mids)
+DRUM_TONAL_MAX = 0.30     # and the overall "noteness" of the spectrum is low
+SR = 48000            # working sample rate (the Model:Samples uses 48 kHz too)
+ASR = 24000           # sample rate used for analysis
 NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
@@ -42,8 +45,9 @@ _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 # --------------------------------------------------------------------------- ffmpeg
 @functools.lru_cache(maxsize=1)
 def ffmpeg_exe() -> str:
+    """Path of the ffmpeg binary (the one bundled with imageio-ffmpeg, else the system one)."""
     try:
-        import imageio_ffmpeg  # ставит готовый ffmpeg вместе с pip
+        import imageio_ffmpeg  # installs a ready-made ffmpeg together with pip
         p = imageio_ffmpeg.get_ffmpeg_exe()
         if p and os.path.exists(p):
             return p
@@ -52,10 +56,11 @@ def ffmpeg_exe() -> str:
     p = shutil.which("ffmpeg")
     if p:
         return p
-    raise RuntimeError(T("ffmpeg не найден (pip install imageio-ffmpeg)"))
+    raise RuntimeError(T("ffmpeg not found (pip install imageio-ffmpeg)"))
 
 
 def _ff(args, data: bytes | None = None) -> bytes:
+    """Run ffmpeg with the given arguments (optionally feeding bytes to stdin). -> stdout bytes"""
     r = subprocess.run(
         [ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-nostdin", *args],
         input=data, capture_output=True, creationflags=_NOWIN,
@@ -65,15 +70,15 @@ def _ff(args, data: bytes | None = None) -> bytes:
     return r.stdout
 
 
-I16 = 16384.0        # исходник храним в int16 на −6 дБ: настоящий сэмпл = q / I16 (без клиппинга)
+I16 = 16384.0        # the source is stored as int16 at -6 dB: real sample = q / I16 (no clipping)
 
 
 def load_audio_i16(path, sr: int = SR, tmp_dir=None) -> np.ndarray:
-    """Любой файл -> int16 стерео (N, 2), сэмпл = q / I16 (уровень −6 дБ — без клиппинга; 15 бит
-    точнее mp3/YouTube-исходника). Вдвое меньше float32.
-    tmp_dir — ffmpeg пишет звук во временный файл, а массив отображается на него (memmap):
-    звук не занимает личную память процесса, система сама подгружает нужные куски.
-    Файл удаляется release_audio()."""
+    """Any file -> int16 stereo (N, 2), sample = q / I16 (level -6 dB — no clipping; 15 bits are
+    more precise than an mp3/YouTube source). Half the size of float32.
+    tmp_dir — ffmpeg writes the audio to a temporary file and the array is mapped onto it (memmap):
+    the audio doesn't take the process's private memory, the OS loads the needed pieces itself.
+    The file is deleted by release_audio()."""
     args = ["-i", str(path), "-vn", "-af", "volume=0.5", "-f", "s16le", "-acodec", "pcm_s16le",
             "-ac", "2", "-ar", str(sr)]
     if tmp_dir is None:
@@ -89,19 +94,19 @@ def load_audio_i16(path, sr: int = SR, tmp_dir=None) -> np.ndarray:
             raise
     if len(x) < sr * 5:
         release_audio(x)
-        raise RuntimeError(T("слишком короткий или пустой файл"))
+        raise RuntimeError(T("the file is too short or empty"))
     return x
 
 
 def release_audio(x) -> None:
-    """Закрыть отображение и удалить временный файл звука (если он был)."""
+    """Close the memory mapping and delete the temporary audio file (if there was one)."""
     mm = x if isinstance(x, np.memmap) else getattr(x, "base", None)
     while mm is not None and not isinstance(mm, np.memmap):
         mm = getattr(mm, "base", None)
     if isinstance(mm, np.memmap):
         f = mm.filename
         try:
-            mm._mmap.close()                 # на Windows файл нельзя удалить, пока он отображён
+            mm._mmap.close()                 # on Windows a file can't be deleted while it is mapped
         except Exception:
             pass
         _unlink(f)
@@ -115,10 +120,12 @@ def _unlink(f):
 
 
 def save_mp3(src_path, dst_path, bitrate="320k"):
+    """Encode any audio file to a 320 kbps mp3 (used to keep the source track next to the loops)."""
     _ff(["-y", "-i", str(src_path), "-vn", "-codec:a", "libmp3lame", "-b:a", bitrate, str(dst_path)])
 
 
 def write_wav(path, x: np.ndarray, sr: int = SR, bits: int = 24):
+    """Write a WAV file: 24-bit, or 16-bit with TPDF dither (for the Model:Samples mono files)."""
     x = np.asarray(x, dtype=np.float64)
     if x.ndim == 1:
         x = x[:, None]
@@ -138,8 +145,9 @@ def write_wav(path, x: np.ndarray, sr: int = SR, bits: int = 24):
         w.writeframes(data)
 
 
-# --------------------------------------------------------------------------- спектр
+# --------------------------------------------------------------------------- spectrum
 def mel_filterbank(sr, n_fft, n_mels=64, fmin=30.0, fmax=11000.0):
+    """Triangular mel filters. -> (filters (n_mels, bins), centre frequencies in Hz)"""
     def hz2mel(f):
         return 2595.0 * np.log10(1.0 + f / 700.0)
 
@@ -154,16 +162,16 @@ def mel_filterbank(sr, n_fft, n_mels=64, fmin=30.0, fmax=11000.0):
         up = (freqs - l) / max(c - l, 1e-9)
         down = (r - freqs) / max(r - c, 1e-9)
         fb[i] = np.maximum(0.0, np.minimum(up, down))
-        if fb[i].sum() == 0:                       # слишком узкий фильтр на низах
+        if fb[i].sum() == 0:                       # filter too narrow in the lows
             fb[i, int(np.argmin(np.abs(freqs - c)))] = 1.0
     return fb, pts[1:-1]
 
 
-# --------------------------------------------------------------------------- тональность
-# Профили Крумхансла–Кесслера
+# --------------------------------------------------------------------------- key detection
+# Krumhansl-Kessler key profiles
 _KK_MAJ = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
 _KK_MIN = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
-# Профили Темперли (лучше на поп/соул/джазе)
+# Temperley profiles (better on pop/soul/jazz); both are averaged
 _TP_MAJ = np.array([5.0, 2.0, 3.5, 2.0, 4.5, 4.0, 2.0, 4.5, 2.0, 3.5, 1.5, 4.0])
 _TP_MIN = np.array([5.0, 2.0, 3.5, 4.5, 2.0, 4.0, 2.0, 4.5, 3.5, 2.0, 1.5, 4.0])
 
@@ -178,7 +186,7 @@ _PROF_MIN = _z(_z(_KK_MIN) + _z(_TP_MIN))
 
 
 def key_scores(ch: np.ndarray) -> np.ndarray:
-    """Корреляция с 24 тональностями: [0..11] мажор, [12..23] минор."""
+    """Correlation with the 24 keys: [0..11] major, [12..23] minor."""
     c = _z(ch)
     out = np.zeros(24)
     for t in range(12):
@@ -188,6 +196,7 @@ def key_scores(ch: np.ndarray) -> np.ndarray:
 
 
 def key_from_scores(sc: np.ndarray):
+    """Best of the 24 key scores. -> (tonic 0..11, "maj"/"min", confidence 0..1)"""
     order = np.argsort(sc)[::-1]
     best, second = sc[order[0]], sc[order[1]]
     k = int(order[0])
@@ -196,19 +205,21 @@ def key_from_scores(sc: np.ndarray):
 
 
 def key_name(tonic: int, mode: str) -> str:
+    """Key name used in file names: "Amin", "C#maj"."""
     return f"{NOTE_NAMES[tonic]}{mode}"
 
 
 def camelot(tonic: int, mode: str) -> str:
+    """Camelot wheel code (8A, 10B...): same or neighbouring numbers mix well."""
     rel_major = tonic if mode == "maj" else (tonic + 3) % 12
     num = ((rel_major * 7) % 12 + 7) % 12 + 1
     return f"{num}{'B' if mode == 'maj' else 'A'}"
 
 
 def chroma_matrix(freqs: np.ndarray, tuning_cents: float, fmin=65.406, fmax=2093.0):
-    """Матрица бинов спектра -> 12 классов высоты (с учётом строя)."""
+    """Matrix spectrum bins -> 12 pitch classes (taking the tuning into account)."""
     M = np.zeros((12, len(freqs)), np.float32)
-    k = 2 ** (tuning_cents / 1200.0)          # ровно 5 октав C2..C7, чтобы ни одна нота не перевешивала
+    k = 2 ** (tuning_cents / 1200.0)          # exactly 5 octaves C2..C7, so no single note outweighs the rest
     ok = (freqs >= fmin * k * 2 ** (-1 / 24)) & (freqs < fmax * k * 2 ** (-1 / 24))
     midi = 69 + 12 * np.log2(np.maximum(freqs, 1e-6) / 440.0) - tuning_cents / 100.0
     nearest = np.round(midi)
@@ -221,24 +232,24 @@ def chroma_matrix(freqs: np.ndarray, tuning_cents: float, fmin=65.406, fmax=2093
 
 
 def tonal_peaks(S: np.ndarray) -> np.ndarray:
-    """Оставляем только тональные пики спектра (ноты), убираем шум, шипение винила и барабаны."""
+    """Keep only the tonal peaks of the spectrum (notes); remove noise, vinyl hiss and drums."""
     lm = ndimage.uniform_filter1d(S, 31, axis=1, mode="nearest")
     a = np.roll(S, 1, axis=1)
     b = np.roll(S, -1, axis=1)
     pk = (S >= a) & (S >= b) & (S > 2.0 * lm)
     out = np.where(pk, S - lm, 0.0).astype(np.float32)
-    # пик «размазан» на соседние бины — учитываем их тоже
+    # a peak is "smeared" over neighbouring bins — count them too
     return out + 0.5 * (np.roll(out, 1, axis=1) + np.roll(out, -1, axis=1))
 
 
 def tonal_chroma(S: np.ndarray, freqs: np.ndarray, tuning_cents: float) -> np.ndarray:
-    """-> (кадры, 12), каждый кадр нормирован; плюс веса кадров"""
+    """-> (frames, 12), every frame normalised; plus frame weights"""
     M = chroma_matrix(freqs, tuning_cents).T
     return np.concatenate([(tonal_peaks(S[i:i + 2048]) ** 1.5) @ M for i in range(0, max(len(S), 1), 2048)])
 
 
 def estimate_tuning(S: np.ndarray, freqs: np.ndarray) -> float:
-    """Насколько пластинка «уплыла» от A=440 (в центах, -50..+50). Старые записи часто не в строе."""
+    """How far the record "drifted" from A=440 (cents, -50..+50). Old recordings are often off."""
     sub = S[:: max(1, len(S) // 600)]
     band = (freqs > 100) & (freqs < 2000)
     idx = np.where(band)[0]
@@ -263,13 +274,13 @@ def estimate_tuning(S: np.ndarray, freqs: np.ndarray) -> float:
 
 
 def wrap_tuning(cents: float):
-    """Строй + сдвиг -> (строй в -50..50, на сколько полутонов сдвинулись названия нот)."""
+    """Tuning + shift -> (tuning in -50..50, by how many semitones the note names moved)."""
     k = math.floor((cents + 50) / 100.0)
     return cents - 100 * k, k
 
 
 def loop_chroma(x48: np.ndarray, tuning_cents: float) -> tuple[np.ndarray, float]:
-    """Хрома короткого лупа. -> (вектор 12, «ясность» гармонии 0..1)"""
+    """Chroma of a short loop. -> (12-vector, "clarity" of the harmony 0..1)"""
     y = signal.resample_poly(x48.mean(1), 1, 2).astype(np.float32)
     n_fft, hop = 4096, 1024
     S = stft_mag(y, n_fft, hop, max_bin=400)
@@ -285,8 +296,8 @@ def loop_chroma(x48: np.ndarray, tuning_cents: float) -> tuple[np.ndarray, float
 
 
 def harmonic_frames(C: np.ndarray, df: float, min_harm: int = 5, step: int = 1500) -> np.ndarray:
-    """Для каждого кадра спектра: есть ли звук с гармоническим рядом (≥ min_harm обертонов
-    из первых восьми на местах f, 2f, 3f…). У барабанов обертоны негармоничны — их нет."""
+    """For every spectrum frame: is there a sound with a harmonic series (>= min_harm partials
+    out of the first eight at f, 2f, 3f...). Drum partials are inharmonic — they have none."""
     nb = C.shape[1]
     f = np.arange(nb) * df
     f0s = np.geomspace(70, 700, 140)
@@ -300,13 +311,14 @@ def harmonic_frames(C: np.ndarray, df: float, min_harm: int = 5, step: int = 150
         lm = ndimage.uniform_filter1d(X, 31, axis=1, mode="nearest")
         pk = (X >= np.roll(X, 1, 1)) & (X >= np.roll(X, -1, 1)) & (X > 2.5 * lm) & (f[None, :] > 50)
         pkd = pk | np.roll(pk, 1, 1) | np.roll(pk, -1, 1)
-        P = pkd[:, bins] & valid[None]                   # (кадры, кандидаты f0, гармоники)
+        P = pkd[:, bins] & valid[None]                   # (frames, f0 candidates, harmonics)
         cnt = np.where(P[:, :, 0] | P[:, :, 1], P.sum(2), 0)
         out[i:i + step] = cnt.max(1) >= min_harm
     return out
 
 
 def longest_run(b: np.ndarray) -> int:
+    """Length of the longest run of True values."""
     best = cur = 0
     for v in b:
         cur = cur + 1 if v else 0
@@ -315,8 +327,8 @@ def longest_run(b: np.ndarray) -> int:
 
 
 def attack_curve(hp: np.ndarray) -> np.ndarray:
-    """Кривая «подъёма громкости» с точностью до сэмпла.
-    Огибающая = максимум за последние 12 мс (так низкая бочка не «дрожит»)."""
+    """Sample-accurate "loudness rise" curve (used to find exact attack positions).
+    Envelope = maximum over the last 12 ms (so a low kick doesn't "wobble")."""
     W = int(0.012 * SR)
     env = ndimage.maximum_filter1d(np.abs(hp), W, origin=(W - 1) // 2)
     env = ndimage.uniform_filter1d(env, 12)
@@ -325,20 +337,20 @@ def attack_curve(hp: np.ndarray) -> np.ndarray:
     return rise
 
 
-# --------------------------------------------------------------------------- анализ трека
+# --------------------------------------------------------------------------- track analysis
 class TrackAnalysis:
-    """Весь анализ одного трека."""
+    """All analysis of one track: tempo, beat grid, key, timbre per beat, isolation features."""
 
     def __init__(self, audio: np.ndarray, want_iso: bool = False):
-        """audio — int16 из load_audio_i16 (или float32 (N, 2)). want_iso — сразу посчитать
-        признаки для «только бас / вокал / пэды» (иначе они не нужны и память не тратится)."""
+        """audio — int16 from load_audio_i16 (or float32 (N, 2)). want_iso — compute the features for
+        "bass / vocals / pads only" right away (otherwise they aren't needed and no memory is spent)."""
         if audio.dtype != np.int16:
             audio = np.clip(np.round(np.asarray(audio, np.float32) * I16), -32768, 32767).astype(np.int16)
-        self.x = audio                   # сам звук (int16, сэмпл = q / I16) — нужен только для нарезки
+        self.x = audio                   # the audio itself (int16, sample = q / I16) — only needed for cutting
         self.dur = len(audio) / SR
         y, self.rise, self.rms_total = self._stream(audio)
 
-        # --- онсеты (атаки) для темпа и сетки: mel-полосы сразу по кускам, без полного спектра
+        # --- onsets (attacks) for tempo and grid: mel bands computed chunk by chunk, no full spectrum
         n_fft, hop = 1024, 256
         self.fps = ASR / hop
         fb, centers = mel_filterbank(ASR, n_fft, 64, 30, 11000)
@@ -355,29 +367,29 @@ class TrackAnalysis:
         self.onset = self._norm_onset(flux.mean(1))
         self.onset_low = self._norm_onset(flux[:, low].mean(1))
         del flux, L
-        # признаки «только бас / вокал / пэды» — сейчас, пока есть сигнал 24 кГц (долю «нотных» кадров
-        # допишем ниже, когда посчитаем длинный спектр)
+        # "bass / vocals / pads only" features — now, while the 24 kHz signal exists (the share of
+        # "note" frames is filled in below, once the long spectrum is computed)
         self._iso = iso.features(y, ASR, self.mel, centers, self.fps, None, ASR / 1024) if want_iso else None
 
-        # --- спектр для гармонии (длинное окно)
+        # --- spectrum for harmony (long window)
         cn, ch = 4096, 1024
         self.cfps = ASR / ch
         maxb = int(5000 / (ASR / cn))
         C = stft_mag(y, cn, ch, max_bin=maxb)
-        del y                                                     # дальше сигнал 24 кГц не нужен
+        del y                                                     # the 24 kHz signal is not needed any more
         cfreqs = np.fft.rfftfreq(cn, 1.0 / ASR)[:maxb]
-        # доля «нот» в спектре 55–2100 Гц: у чистых барабанов ~0.1, с басом или аккордами 0.45+
+        # share of "notes" in the 55-2100 Hz spectrum: pure drums ~0.1, with bass or chords 0.45+
         tb = (cfreqs >= 55) & (cfreqs <= 2100)
         tf = []
         for i in range(0, len(C), 2048):
             Cb = C[i:i + 2048, tb]
             tf.append((tonal_peaks(Cb) ** 2).sum(1) / ((Cb * Cb).sum(1) + 1e-12))
         self.tonal_frac = np.concatenate(tf).astype(np.float32)
-        # кадры, где звучит что-то с гармоническим рядом f, 2f, 3f… (любой инструмент или голос)
+        # frames where something with a harmonic series f, 2f, 3f... sounds (any instrument or voice)
         self.pitched = harmonic_frames(C, cfreqs[1] - cfreqs[0])
         if self._iso is not None:
             self._iso["pitched"] = self.pitched.astype(bool)
-        eh, ep = spec.hpss_inplace(C, 17, 17)                     # C -> тянущаяся часть, на месте
+        eh, ep = spec.hpss_inplace(C, 17, 17)                     # C -> its sustained part, in place
         self.harm_ratio = (eh / (eh + ep + 1e-12)).astype(np.float32)
         self.tuning = estimate_tuning(C, cfreqs)
         chroma = tonal_chroma(C, cfreqs, self.tuning)
@@ -388,7 +400,7 @@ class TrackAnalysis:
         tch = (self.chroma * np.sqrt(nrm)).sum(0)
         self.track_chroma = tch / (tch.sum() + 1e-9)
 
-        # --- темп и сетка
+        # --- tempo and beat grid
         self.tempo = self.estimate_tempo()
         self.period = self.fps * 60.0 / self.tempo
         bf = self.track_beats(self.onset, self.period)
@@ -413,19 +425,19 @@ class TrackAnalysis:
 
     @staticmethod
     def _stream(x: np.ndarray):
-        """Кусками по 10 с: моно 24 кГц, кривая атак 48 кГц и общая громкость.
-        Полная моно-копия трека и 64-битные временные массивы не создаются."""
+        """In 10 s chunks: mono 24 kHz, attack curve at 48 kHz and overall loudness.
+        No full mono copy of the track and no 64-bit temporary arrays are created."""
         n = len(x)
         k = np.float32(0.5 / I16)
 
         def mono(a, b):
             return (x[a:b, 0].astype(np.float32) + x[a:b, 1]) * k
 
-        y = spec.down_stream(mono, n, 2)                          # 24 кГц для анализа
+        y = spec.down_stream(mono, n, 2)                          # 24 kHz for analysis
         sos = signal.butter(2, 70, "highpass", fs=SR, output="sos").astype(np.float32)
         zi = np.zeros((sos.shape[0], 2), np.float32)
-        rise = np.empty(n, np.float16)                            # кривая атак: точности float16 хватает
-        R, LA = 2048, 64                                          # контекст слева (окно 12 мс) и справа
+        rise = np.empty(n, np.float16)                            # attack curve: float16 precision is enough
+        R, LA = 2048, 64                                          # context on the left (12 ms window) and on the right
         hist, h0, done, ss = np.zeros(0, np.float32), 0, 0, 0.0
         for a in range(0, n, spec.BLOCK):
             m = mono(a, a + spec.BLOCK)
@@ -441,19 +453,19 @@ class TrackAnalysis:
         return y, rise, float(np.sqrt(ss / max(n, 1)) + 1e-9)
 
     def audio(self, a: int, b: int) -> np.ndarray:
-        """Кусок звука [a, b) в сэмплах -> float32 (N, 2)."""
+        """A piece of audio [a, b) in samples -> float32 (N, 2)."""
         a, b = max(0, int(a)), min(len(self.x), int(b))
         return self.x[a:b].astype(np.float32) * np.float32(1.0 / I16)
 
     @property
     def iso(self) -> dict:
-        """Признаки для «только бас / вокал / пэды» (TrackAnalysis(..., want_iso=True))."""
+        """Features for "bass / vocals / pads only" (TrackAnalysis(..., want_iso=True))."""
         if self._iso is None:
-            raise RuntimeError("признаки изоляции не посчитаны: нужен TrackAnalysis(..., want_iso=True)")
+            raise RuntimeError("isolation features were not computed: TrackAnalysis(..., want_iso=True) is needed")
         return self._iso
 
     def drum_metrics(self, t0: float, t1: float) -> dict:
-        """Проверка «только барабаны» для куска t0..t1 (в секундах)."""
+        """The "drums only" check for the span t0..t1 (seconds)."""
         ca, cb = int(t0 * self.cfps), max(int(t1 * self.cfps), int(t0 * self.cfps) + 2)
         pf = self.pitched[ca:cb]
         frac = float(pf.mean()) if len(pf) else 1.0
@@ -467,16 +479,55 @@ class TrackAnalysis:
               and mid_gap >= DRUM_GAP_DB and tonal <= DRUM_TONAL_MAX)
         return dict(ok=ok, pitched=frac, run=run, low_gap=low_gap, mid_gap=mid_gap, tonal=tonal)
 
+    def drum_purity(self, t0: float, t1: float) -> float:
+        """How "pure" a drum span is, 0..1 (shown in Debugging mode): no harmonic frames and deep
+        gaps between hits give 1."""
+        d = self.drum_metrics(t0, t1)
+        return float(0.5 * np.clip(1 - d["pitched"] / DRUM_PITCHED_MAX, 0, 1)
+                     + 0.25 * np.clip((d["low_gap"] - DRUM_GAP_DB) / 15, 0, 1)
+                     + 0.25 * np.clip((d["mid_gap"] - DRUM_GAP_DB) / 15, 0, 1))
+
+    def edge_jump(self, t0: float, t1: float) -> float:
+        """Loudness jump at the wrap of a loop t0..t1, dB: the level of the first 100 ms minus the level of
+        the 120 ms before the end (the last 30 ms are skipped — a new attack may begin there).
+        A vocal loop that starts in the middle of a loud passage and ends quiet jumps at every restart."""
+        def level(a, b):
+            x = self.audio(int(a * SR), int(b * SR)).astype(np.float64)
+            return 10 * np.log10(float(np.mean(x * x)) + 1e-12)
+        return level(t0, t0 + 0.10) - level(t1 - 0.15, t1 - 0.03)
+
+    def late_entry(self, t0: float, t1: float, tail: float = 0.5) -> bool:
+        """Does something new come in during the last `tail` seconds of the span — a louder part, a new
+        note, or a new instrument in some frequency band? For off-grid pads such a span would cut that
+        sound off at every restart of the loop."""
+        F = self.iso
+        fps = F["fps"]
+        a, b, k = int(t0 * fps), int(t1 * fps), int(tail * fps)
+        if b - a < 2 * k:
+            return False
+        tot = F["tot"][a:b]
+        if np.percentile(tot[-k:], 90) - np.median(tot[:-k]) >= 6.0:
+            return True                                   # clearly louder at the end (a slow swell is fine)
+        h = F["hon"][a:b]
+        if h[-k:].max() >= max(2.5 * float(np.median(F["hon"])), 1.6 * float(np.percentile(h[:-k], 90))):
+            return True                                   # a new note starts
+        fm = self.fps
+        am, bm, km = int(t0 * fm), int(t1 * fm), int(tail * fm)
+        rest = 10 * np.log10((10 ** (self.mel[am:bm - km] / 10)).mean(0) + 1e-10)
+        end = 10 * np.log10((10 ** (self.mel[bm - km:bm] / 10)).mean(0) + 1e-10)
+        loud = rest > rest.max() - 35                     # bands that actually carry sound
+        return bool(np.max((end - rest)[loud]) >= 8.0)     # a new instrument in some band
+
     def rhythm_problem(self) -> str | None:
-        """Почему этот трек не годится для ровных лупов (или None, если всё хорошо)."""
+        """Why this track is no good for tight loops (or None if all is well)."""
         if self.rms_db < -45:
-            return T("почти тишина")
+            return T("almost silence")
         if len(self.beat_times) < 24:
-            return T("не нашёл ритма")
+            return T("no rhythm found")
         if self.pulse < 2.5 or self.pulse_ac < 0.15:
-            return T("нет чёткого ритма (шум, эмбиент или пэды)")
+            return T("no clear rhythm (noise, ambient or pads)")
         if self.ibi_cv > 0.05:
-            return T("темп «плавает» (рубато, живой темп без метронома)")
+            return T("the tempo drifts (rubato, live playing without a click)")
         return None
 
     # ----------------------------------------------------------------- helpers
@@ -487,7 +538,7 @@ class TrackAnalysis:
         return (o / (o.std() + 1e-9)).astype(np.float32)
 
     def estimate_tempo(self) -> float:
-        """Темп, «свёрнутый» в диапазон 57.5..122.5 BPM (все октавы складываются вместе)."""
+        """Tempo "folded" into 57.5..122.5 BPM (all octaves are added together)."""
         o = self.onset + 0.5 * self.onset_low
         o = o - o.mean()
         n = len(o)
@@ -512,7 +563,7 @@ class TrackAnalysis:
 
     @staticmethod
     def track_beats(onset, period, tightness=120.0):
-        """Beat tracking (Эллис, 2007) — динамическое программирование."""
+        """Beat tracking (Ellis, 2007) — dynamic programming over the onset curve."""
         n = len(onset)
         sig = max(period / 32.0, 0.5)
         local = ndimage.gaussian_filter1d(onset.astype(np.float64), sig)
@@ -532,7 +583,7 @@ class TrackAnalysis:
                     back[t] = z[m][k]
                     continue
             score[t] = local[t]
-        # последний удар
+        # the last beat
         mx = signal.argrelmax(score, order=max(1, int(period / 4)))[0]
         if len(mx) == 0:
             return np.array([], float)
@@ -544,7 +595,7 @@ class TrackAnalysis:
             beats.append(t)
             t = back[t]
         beats = np.array(beats[::-1], float)
-        # отбрасываем «пустые» доли в начале/конце (тишина, затухание)
+        # drop "empty" beats at the start/end (silence, fade-out)
         strong = local[beats.astype(int)] > 0.25 * np.median(local[beats.astype(int)])
         if strong.any():
             a, b = np.argmax(strong), len(strong) - np.argmax(strong[::-1])
@@ -552,7 +603,7 @@ class TrackAnalysis:
         return beats
 
     def refine_times(self, times, win=0.03):
-        """Подтягиваем каждую долю к реальной атаке с точностью до сэмпла."""
+        """Pull every beat to the real attack with sample accuracy."""
         rise = self.rise
         out, st = [], []
         w, ctx = int(win * SR), int(0.25 * SR)
@@ -566,7 +617,7 @@ class TrackAnalysis:
             ca, cb = max(0, c - ctx), min(len(rise), c + ctx)
             ref = float(np.percentile(np.abs(rise[ca:cb]), 95)) + 1e-9
             s = float(seg[k]) / ref
-            # самое начало атаки: первая точка перед пиком, где подъём > 25% пика
+            # the very beginning of the attack: the first point before the peak where the rise is > 25% of the peak
             lo = max(0, k - int(0.02 * SR))
             below = np.where(seg[lo:k + 1] <= 0.25 * seg[k])[0]
             k0 = lo + int(below[-1]) + 1 if len(below) else lo
@@ -580,7 +631,7 @@ class TrackAnalysis:
             return 0
         ol = self.onset_low[np.clip(bf, 0, len(self.onset_low) - 1)]
         of = self.onset[np.clip(bf, 0, len(self.onset) - 1)]
-        # смена гармонии на сильную долю
+        # harmony changes on the downbeat
         hc = np.zeros(len(bf))
         cf = np.clip((bf / self.fps * self.cfps).astype(int), 1, len(self.chroma) - 1)
         hc = 1 - np.sum(self.chroma[cf] * self.chroma[cf - 1], axis=1)
@@ -593,7 +644,7 @@ class TrackAnalysis:
         return best
 
     def beat_features(self):
-        """Тембр + гармония на каждую долю — чтобы сравнивать куски между собой."""
+        """Timbre + harmony per beat — to compare spans with each other."""
         bt = self.beat_times
         nb = len(bt) - 1
         if nb < 2:
@@ -621,7 +672,7 @@ class TrackAnalysis:
         feats /= (np.linalg.norm(feats, axis=1, keepdims=True) + 1e-9)
         return feats, harm, rms, chro
 
-    # ----------------------------------------------------------------- подбор лупов
+    # ----------------------------------------------------------------- picking loops
     def candidates(self, bars=2, prefer="any", step_beats=4, min_energy=0.35):
         feats, harm, rms, chro = self.beat_feats
         L = bars * 4
@@ -642,7 +693,7 @@ class TrackAnalysis:
             if prefer == "drums":
                 dm = self.drum_metrics(bt[s], bt[e])
                 if not dm["ok"]:
-                    continue      # слышны бас, аккорды, голос или стабы — это не чистые барабаны
+                    continue      # bass, chords, voice or stabs are audible — not pure drums
             ibi = np.diff(bt[s:e + 1])
             if (ibi < med_ibi * 0.8).any() or (ibi > med_ibi * 1.25).any():
                 continue
@@ -683,14 +734,14 @@ class TrackAnalysis:
             c["rank"] = c["score"]
         return select_loops(cands, n, rng, (0.93, 0.975, 0.985) if prefer == "drums" else (0.93, 0.975, 1.01))
 
-    # ----------------------------------------------------------------- изолированные партии
+    # ----------------------------------------------------------------- isolated parts
     def iso_metrics(self, t0: float, t1: float) -> dict:
-        """Метрики изоляции; короткие куски оцениваем вместе с соседством (минимум 4 с)."""
+        """Isolation metrics; short spans are judged together with their surroundings (at least 4 s)."""
         pad = max(0.0, (4.0 - (t1 - t0)) / 2)
         return iso.metrics(self.iso, max(0.0, t0 - pad), min(self.dur, t1 + pad))
 
     def sig_at(self, t0: float, t1: float) -> np.ndarray:
-        """«Подпись» куска вне сетки — в том же пространстве, что и у кандидатов по долям."""
+        """A "signature" of an off-grid span — in the same space as the signatures of beat-grid candidates."""
         a, b = int(t0 * self.fps), max(int(t1 * self.fps), int(t0 * self.fps) + 1)
         timb = self.mel[a:b].mean(0)
         mu, sd = getattr(self, "timb_stats", (self.mel.mean(0), self.mel.std(0) + 1e-6))
@@ -703,8 +754,8 @@ class TrackAnalysis:
         return f / (np.linalg.norm(f) + 1e-9)
 
     def iso_candidates(self, kind: str, bars: int, free_bpm: float | None = None) -> list[dict]:
-        """Куски, где звучит только `kind`. По сетке долей, а для пэдов и вокала — ещё и там,
-        где сетки нет (вступление без бита, эмбиент): такие режем ровно под free_bpm."""
+        """Spans where only `kind` is audible. On the beat grid, and for pads and vocals also where there
+        is no grid (a beatless intro, ambient): those are cut exactly to free_bpm."""
         if kind == "drums":
             out = self.candidates(bars, "drums")
             for c in out:
@@ -713,7 +764,7 @@ class TrackAnalysis:
         out = []
         grid_ok = self.rhythm_problem() is None
         if grid_ok:
-            for c in self.candidates(bars, "any", min_energy=0.08):     # пэды и вступления тише припева
+            for c in self.candidates(bars, "any", min_energy=0.08):     # pads and intros are quieter than the chorus
                 m = self.iso_metrics(c["t0"], c["t1"])
                 g = iso.grade(m, kind)
                 if g:
@@ -725,7 +776,7 @@ class TrackAnalysis:
             spans = [(0.5, self.dur - 1.0)] if not grid_ok or len(bt) < 2 else \
                 [(0.5, float(bt[0])), (float(bt[-1]), self.dur - 1.0)]
             F = self.iso
-            floor = float(np.median(F["tot"])) - 25          # не берём почти тишину
+            floor = float(np.median(F["tot"])) - 25          # skip near-silence
             for a, b in spans:
                 t = a
                 while t + L <= b:
@@ -740,13 +791,13 @@ class TrackAnalysis:
 
 
 def select_loops(cands: list[dict], n: int, rng=None, sims=(0.93, 0.975, 1.01)) -> list[dict]:
-    """Лучшие n непересекающихся и непохожих друг на друга кусков.
-    Порядок: сначала «чисто» (grade 2), потом «с примесью»; внутри — по порядку типов, затем по рангу."""
+    """The best n non-overlapping spans that don't sound alike.
+    Order: "clean" (grade 2) first, then "with extras"; inside — by kind order, then by rank."""
     if not cands:
         return []
     rng = rng or np.random.default_rng()
     order = {k: i for i, k in enumerate(iso.KINDS)}
-    for c in cands:   # немного случайности, как в настоящем копании
+    for c in cands:   # a little randomness, as in real digging
         c["_r"] = c["rank"] + float(rng.normal(0, 0.012))
     cands = sorted(cands, key=lambda c: (-c.get("grade", 2), order.get(c.get("kind"), 0), -c["_r"]))
     chosen = []
@@ -764,13 +815,63 @@ def select_loops(cands: list[dict], n: int, rng=None, sims=(0.93, 0.975, 1.01)) 
             chosen.append(c)
         if len(chosen) >= n:
             break
-    return chosen          # в порядке приоритета (лучшие первыми)
+    return chosen          # in priority order (best first)
 
 
-# --------------------------------------------------------------------------- темп и рендер
+def _fits(queue: list[dict], chosen: list[dict], tried: set, sims) -> "iter":
+    """Candidates of one queue that may join `chosen`, best first: no time overlap with chosen spans,
+    and not too similar to them — first at the strictest similarity threshold, then at looser ones."""
+    for thresh in sims:
+        for c in queue:
+            if id(c) in tried:
+                continue
+            if any(not (c["t1"] <= d["t0"] or c["t0"] >= d["t1"]) for d in chosen):
+                tried.add(id(c))                          # overlaps a chosen span — never fits again
+                continue
+            sig = c["sig"] / (np.linalg.norm(c["sig"]) + 1e-9)
+            if any(float(np.dot(sig, d["sig"] / (np.linalg.norm(d["sig"]) + 1e-9))) > thresh for d in chosen):
+                continue                                  # too similar for now — maybe at a looser threshold
+            tried.add(id(c))
+            yield c
+
+
+def interleave_loops(queues: dict, n: int, accept, sims=(0.93, 0.975, 0.985)) -> list:
+    """Loops of several "Only" types taken in turn, so the same type doesn't come several times in a row.
+    queues — {kind: candidates sorted best first}; accept(c) -> the rendered loop, or None if it can't be
+    used (then the next candidate of the same type takes its place).
+    The first turn goes to the type whose best candidate is the cleanest (grade, then rank; ties — in
+    KINDS order); then the types take turns in KINDS order. A type repeats in a row only when the other
+    types have nothing left. -> accepted loops in the order they were picked."""
+    order = {k: i for i, k in enumerate(iso.KINDS)}
+    active = sorted((k for k in queues if queues[k]), key=lambda k: order.get(k, 9))
+    if not active:
+        return []
+    first = max(active, key=lambda k: (queues[k][0].get("grade", 2), queues[k][0].get("_r", 0), -order.get(k, 9)))
+    i = active.index(first)
+    active = active[i:] + active[:i]
+    chosen, out, tried, pos = [], [], set(), 0
+    while len(out) < n and active:
+        idx = pos % len(active)
+        got = None
+        for c in _fits(queues[active[idx]], chosen, tried, sims):
+            chosen.append(c)
+            got = accept(c)
+            if got is not None:
+                break
+            chosen.pop()                                  # couldn't be rendered — try the next one
+        if got is None:
+            active.pop(idx)                               # this type has nothing left
+            pos = idx
+            continue
+        out.append(got)
+        pos = idx + 1
+    return out
+
+
+# --------------------------------------------------------------------------- tempo and rendering
 def choose_target(real_bpm, bpm_min=60, bpm_max=120, fixed_bpm=None, max_stretch=0.05):
-    """Подбираем целевой темп (кратный 5). Можно взять трек вдвое быстрее/медленнее.
-    -> (target_bpm, множитель интерпретации, ratio) либо None"""
+    """Choose the target tempo (a multiple of 5). The track may be taken at double/half tempo.
+    -> (target_bpm, interpretation multiplier, ratio) or None"""
     best = None
     for mult in (1.0, 2.0, 0.5):
         x = real_bpm * mult
@@ -793,22 +894,22 @@ def choose_target(real_bpm, bpm_min=60, bpm_max=120, fixed_bpm=None, max_stretch
 
 
 def varispeed(seg: np.ndarray, ratio: float) -> tuple[np.ndarray, float]:
-    """Питчинг (как на вертушке): быстрее = выше. -> (аудио, точный фактический ratio)"""
+    """Pitching (like a turntable): faster = higher. -> (audio, exact actual ratio)"""
     fr = Fraction(1.0 / ratio).limit_denominator(1200)
     up, down = fr.numerator, fr.denominator
     z = signal.resample_poly(seg, up, down, axis=0).astype(np.float32)
     return z, down / up
 
 
-# --------------------------------------------------------------------------- свой тайм-стретч
+# --------------------------------------------------------------------------- our own time-stretch
 def _wsola(x: np.ndarray, out_len: int, keep: int, N: int = 1536, tol: int = 512) -> np.ndarray:
-    """WSOLA с картой времени: первые `keep` сэмплов идут 1:1 (атака не трогается),
-    остальное равномерно сжимается/растягивается до out_len."""
+    """WSOLA with a time map: the first `keep` samples go 1:1 (the attack is untouched),
+    the rest is evenly compressed/stretched to out_len."""
     L = len(x)
     if out_len <= 0:
         return np.zeros((0, x.shape[1]), np.float32)
     keep = min(keep, L, out_len)
-    if L - keep < N // 2 or out_len - keep < N // 2:      # кусок слишком короткий — просто ресемплим хвост
+    if L - keep < N // 2 or out_len - keep < N // 2:      # piece too short — just resample the tail
         tail = x[keep:]
         need = out_len - keep
         if need <= 0:
@@ -819,7 +920,7 @@ def _wsola(x: np.ndarray, out_len: int, keep: int, N: int = 1536, tol: int = 512
         res = np.stack([np.interp(pos, np.arange(len(tail)), tail[:, c]) for c in range(x.shape[1])], 1)
         return np.vstack([x[:keep], res]).astype(np.float32)
     Hs = N // 2
-    win = (0.5 - 0.5 * np.cos(2 * np.pi * np.arange(N) / N)).astype(np.float32)   # периодический Ханн: сумма = 1
+    win = (0.5 - 0.5 * np.cos(2 * np.pi * np.arange(N) / N)).astype(np.float32)   # periodic Hann: overlapping windows sum to 1
     pad = N
     xp = np.vstack([np.zeros((pad, x.shape[1]), np.float32), x, np.zeros((pad, x.shape[1]), np.float32)])
     xm = xp.mean(1)
@@ -827,16 +928,16 @@ def _wsola(x: np.ndarray, out_len: int, keep: int, N: int = 1536, tol: int = 512
     ws = np.zeros(out_len + 2 * N, np.float32)
     slope = (L - keep) / (out_len - keep)
 
-    def nominal(t):            # t — позиция в выходе (без паддинга)
+    def nominal(t):            # t — position in the output (without padding)
         return t if t < keep else keep + (t - keep) * slope
 
     prev = None
     k = 0
     while True:
-        t_out = k * Hs - pad          # левый край кадра в координатах выхода
+        t_out = k * Hs - pad          # left edge of the frame in output coordinates
         if t_out >= out_len:
             break
-        c = t_out + N // 2            # центр кадра
+        c = t_out + N // 2            # centre of the frame
         nom = int(round(nominal(c) - N // 2)) + pad
         if prev is None or c < keep:
             pos = nom
@@ -849,7 +950,7 @@ def _wsola(x: np.ndarray, out_len: int, keep: int, N: int = 1536, tol: int = 512
             else:
                 tmpl = xm[nat:nat + N]
                 corr = np.correlate(xm[lo:hi + N], tmpl, mode="valid")
-                # берём только настоящие пики (не край окна), ближние к расчётной позиции — чуть выгоднее
+                # only real peaks (not the edge of the window); ones close to the expected position are slightly preferred
                 inner = np.where((corr[1:-1] > corr[:-2]) & (corr[1:-1] >= corr[2:]))[0] + 1
                 if len(inner):
                     lags = (lo + inner - nom) / float(tol)
@@ -869,7 +970,7 @@ def _wsola(x: np.ndarray, out_len: int, keep: int, N: int = 1536, tol: int = 512
 
 
 def find_anchors(an: "TrackAnalysis", a: int, b: int, min_gap=0.07) -> list[int]:
-    """Атаки (удары) внутри [a, b) — в сэмплах трека."""
+    """Attacks (hits) inside [a, b) — in track samples."""
     r = an.rise[a:b]
     if len(r) < SR // 10:
         return []
@@ -893,10 +994,10 @@ def find_anchors(an: "TrackAnalysis", a: int, b: int, min_gap=0.07) -> list[int]
 
 def anchored_stretch(x: np.ndarray, P0: float, P1: float, anchors: list[int], ratio: float,
                      out_len: int) -> np.ndarray:
-    """Растягивает x[P0:P1] в out_len сэмплов. Каждая атака попадает ровно в (A-P0)/ratio,
-    сама атака не растягивается; растягиваются только «хвосты» между ударами."""
-    F = int(0.008 * SR)                      # перекрёстное затухание на стыке кусков
-    K = int(0.03 * SR)                       # сколько атаки оставлять нетронутой
+    """Stretch x[P0:P1] to out_len samples. Every attack lands exactly at (A-P0)/ratio,
+    the attack itself is not stretched; only the "tails" between hits are."""
+    F = int(0.008 * SR)                      # crossfade at the joints between pieces
+    K = int(0.03 * SR)                       # how much of each attack stays untouched
     P0i = int(round(P0))
     pts = [P0i] + [A for A in sorted(anchors) if P0i + 0.06 * SR < A < P1 - 0.06 * SR]
     clean = [pts[0]]
@@ -928,14 +1029,14 @@ def anchored_stretch(x: np.ndarray, P0: float, P1: float, anchors: list[int], ra
 
 
 def _finish(loop: np.ndarray, pre: np.ndarray | None, normalize: bool) -> np.ndarray:
-    """Стык лупа. pre — звук сразу перед началом лупа: конец лупа плавно переходит в него,
-    и луп становится бесшовным (для пэдов и вокала — тянущийся звук не щёлкает).
-    Без pre — короткие микрофейды, как для ударных (атака на первой доле не размывается)."""
+    """The loop seam. pre — the sound right before the loop start: the end of the loop smoothly
+    crossfades into it, so the loop becomes seamless (pads and vocals — a sustained sound doesn't click).
+    Without pre — short micro-fades, as for drums (the attack on the first beat isn't smeared)."""
     loop = loop.copy()
     if pre is not None and len(pre) >= 64:
         xf = len(pre)
         t = np.linspace(0, np.pi / 2, xf, dtype=np.float32)[:, None]
-        loop[-xf:] = loop[-xf:] * np.cos(t) + pre * np.sin(t)       # равная мощность
+        loop[-xf:] = loop[-xf:] * np.cos(t) + pre * np.sin(t)       # equal power
     else:
         fi, fo = int(0.0008 * SR), int(0.004 * SR)
         loop[:fi] *= np.linspace(0, 1, fi)[:, None]
@@ -947,16 +1048,16 @@ def _finish(loop: np.ndarray, pre: np.ndarray | None, normalize: bool) -> np.nda
     return loop
 
 
-XFADE = {"pads": 0.25, "vocal": 0.03}      # длина бесшовного стыка, с (не больше 1/8 лупа)
+XFADE = {"pads": 0.25, "vocal": 0.03}      # length of the seamless crossfade, s (at most 1/8 of the loop)
 
 
-SONG_KEY_KINDS = ("drums", "bass", "vocal")   # одна линия или одни удары — лад не определить, берём песню
+SONG_KEY_KINDS = ("drums", "bass", "vocal")   # a single line or only hits — the mode can't be told, use the song's key
 
 
 def _loop_key(an: TrackAnalysis, loop: np.ndarray, t0: float, t1: float, tuning_out: float,
               kind: str | None = None) -> dict:
-    """Тональность лупа: голосуют сам луп и окрестность ±20 с в треке.
-    Для изолированных барабанов, баса и вокала — тональность всей песни."""
+    """Key of the loop: the loop itself and the surrounding +-20 s of the track vote.
+    For isolated drums, bass and vocals — the key of the whole song."""
     tun, shift = wrap_tuning(tuning_out)
     if kind in SONG_KEY_KINDS:
         ts = key_scores(np.roll(an.track_chroma, shift) if shift else an.track_chroma)
@@ -966,24 +1067,24 @@ def _loop_key(an: TrackAnalysis, loop: np.ndarray, t0: float, t1: float, tuning_
         return dict(key=key_name(tonic, kmode), camelot=camelot(tonic, kmode), key_conf=round(conf, 2),
                     tuning_cents=round(tun, 1), tonal=round(float(np.mean(te[ca:cb]) / (np.median(te) + 1e-9)), 2))
     lch, clarity = loop_chroma(loop, tun)
-    # контекст: ±20 секунд вокруг лупа (так переживаем модуляции внутри песни)
+    # context: +-20 seconds around the loop (this way modulations inside a song are handled)
     fa, fb = max(0, int((t0 - 20) * an.cfps)), min(len(an.chroma), int((t1 + 20) * an.cfps) + 1)
     w = np.sqrt(np.linalg.norm(an.chroma_raw[fa:fb], axis=1))
     ctx = (an.chroma[fa:fb] * w[:, None]).sum(0)
     ctx = ctx / (ctx.sum() + 1e-9) if ctx.sum() > 0 else an.track_chroma
     tch = np.roll(ctx, shift) if shift else ctx
-    # луп внутри песни обычно в её тональности, но если кусок явно в другой (бридж) — победит луп
+    # a loop inside a song is usually in the song's key, but if the span is clearly in another (bridge) — the loop wins
     ls, ts = key_scores(lch), key_scores(tch)
     tk = int(np.argmax(ts))
-    # сколько в куске «нот» относительно всего трека (у барабанного брейка почти ноль)
+    # how many "notes" the span has relative to the whole track (a drum break has almost none)
     te = an.chroma_raw.sum(1)
     ca, cb = int(t0 * an.cfps), max(int(t1 * an.cfps), int(t0 * an.cfps) + 1)
     tonal_rel = float(np.mean(te[ca:cb]) / (np.median(te) + 1e-9))
     if tonal_rel < 0.35 or ls[tk] >= ls.max() - 0.25:
-        # почти одни барабаны или луп не противоречит песне -> тональность песни
+        # almost only drums, or the loop doesn't contradict the song -> the song's key
         tonic, kmode = tk % 12, ("maj" if tk < 12 else "min")
         conf = float(np.clip(0.5 * (ts[tk] + ls[tk]), 0, 1))
-    else:                                  # явная модуляция — верим лупу
+    else:                                  # a clear modulation — trust the loop
         wl = 0.45 + 0.35 * clarity
         tonic, kmode, conf = key_from_scores(wl * ls + (1 - wl) * ts)
     return dict(key=key_name(tonic, kmode), camelot=camelot(tonic, kmode), key_conf=round(conf, 2),
@@ -994,9 +1095,9 @@ _HP70 = signal.butter(2, 70, "highpass", fs=SR, output="sos").astype(np.float32)
 
 
 def onset_start(an: TrackAnalysis, t: float) -> float:
-    """Настоящее начало удара у доли t. От пика удара идём назад до места, где громкость впервые
-    заметно поднялась над тишиной перед ним (мягкая атака, флэм) — не дальше 30 мс и не позже t."""
-    B = 24                                                    # шаг 0.5 мс
+    """The real start of the hit at beat t. From the peak of the hit, walk back to the point where the
+    level first rose noticeably above the quiet before it (soft attack, flam) — at most 30 ms, never after t."""
+    B = 24                                                    # 0.5 ms step
     a = int((t - 0.2) * SR)
     if a < 0:
         return t
@@ -1005,14 +1106,14 @@ def onset_start(an: TrackAnalysis, t: float) -> float:
     if n < 440:
         return t
     blk = np.abs(m[:n * B]).reshape(n, B).max(1)
-    env = np.maximum(blk[:-1], blk[1:])                       # пик за 1 мс с шагом 0.5 мс
+    env = np.maximum(blk[:-1], blk[1:])                       # peak over 1 ms with a 0.5 ms step
     ti = int(round((t * SR - a) / B))
-    floor = float(np.median(env[ti - 120:ti - 50])) + 1e-9    # тишина 60–25 мс перед долей
+    floor = float(np.median(env[ti - 120:ti - 50])) + 1e-9    # the quiet 60-25 ms before the beat
     w0 = ti - 10
-    pk = w0 + int(np.argmax(env[w0:ti + 30]))                 # сам удар: −5…+15 мс
+    pk = w0 + int(np.argmax(env[w0:ti + 30]))                 # the hit itself: -5...+15 ms
     peak = float(env[pk])
     if peak < 2.5 * floor:
-        return t                                              # нет явного удара — доверяем сетке
+        return t                                              # no clear hit — trust the grid
     thr = max(2.0 * floor, 0.1 * peak)
     j, lo = pk, ti - 60
     while j > lo and env[j - 1] >= thr:
@@ -1020,8 +1121,37 @@ def onset_start(an: TrackAnalysis, t: float) -> float:
     return min(t, (a + j * B) / SR)
 
 
+def attack_start(an: TrackAnalysis, t: float, look: float = 0.060, after: float = 0.015,
+                 rise_db: float = 6.0, peak_db: float = 9.0) -> float:
+    """The real start of a SOFT attack near beat t: a piano or pad chord in reverb, a sung note.
+    The beat grid marks the loudest moment of an attack; a soft attack starts 20-50 ms earlier, which
+    onset_start() (made for sharp drum hits) does not see. Looks for the first frame within `look`
+    seconds before t (up to `after` after it) that rises `rise_db` above the level before it and grows
+    to at least `peak_db`, then walks back to where the rise began. Never returns a time after t."""
+    B = 96                                                    # 2 ms frames
+    a = int((t - 0.25) * SR)
+    if a < 0:
+        return t
+    x = signal.sosfilt(_HP70, an.audio(a, (t + 0.06) * SR).sum(1))
+    n = len(x) // B
+    if n < 150:
+        return t
+    e = 10 * np.log10((x[:n * B].reshape(n, B).astype(np.float64) ** 2).mean(1) + 1e-12)
+    e = np.convolve(e, np.ones(3) / 3, "same")              # light smoothing (6 ms)
+    ti = int(round(0.25 * SR / B))
+    w0, w1 = ti - int(look * SR / B), ti + int(after * SR / B)
+    base = float(np.percentile(e[ti - int(0.20 * SR / B):w0], 30))   # the level before the window
+    j = next((j for j in range(w0, w1) if e[j] >= base + rise_db and e[j - 5] < base + rise_db - 3
+              and e[j:j + 20].max() >= base + peak_db), None)
+    if j is None:
+        return t                                              # no soft attack here
+    while j > w0 - 5 and e[j - 1] < e[j] and e[j - 1] > base + 1.5:
+        j -= 1                                                # back to where the rise began
+    return min(t, (a + j * B) / SR - 0.001)
+
+
 def tail_leak(loop: np.ndarray) -> int:
-    """Сколько последних сэмплов лупа — уже начало следующего удара («щелчок» на стыке). 0 — стык чистый."""
+    """How many last samples of the loop are already the start of the next hit (a "click" at the seam). 0 — clean."""
     m = np.abs(loop).max(1) if loop.ndim == 2 else np.abs(loop)
     B = SR // 1000
     n = len(m) // B
@@ -1029,7 +1159,7 @@ def tail_leak(loop: np.ndarray) -> int:
         return 0
     e = 20 * np.log10(m[:n * B].reshape(n, B).max(1) + 1e-9)
     body = float(np.median(e[-120:-20]))
-    hot = np.nonzero(e[-15:-2] > body + 9)[0]                 # последние 15 мс (без самого фейда)
+    hot = np.nonzero(e[-15:-2] > body + 9)[0]                 # the last 15 ms (without the fade itself)
     return 0 if not len(hot) else len(m) - (n - 15 + int(hot[0])) * B
 
 
@@ -1041,13 +1171,16 @@ def _fade_tail(loop: np.ndarray, n: int) -> np.ndarray:
 
 
 def render_loop(an: TrackAnalysis, s: int, e: int, opts: dict) -> dict | None:
-    """Вырезает луп s..e (индексы долей), подгоняет темп, режет ровно по сетке.
-    Границы — по настоящему началу ударов; после нарезки проверяется стык: если в конец попало
-    начало следующего удара, конец сдвигается раньше и луп режется заново (в «Питчинге» — с чуть
-    большим замедлением). Не вышло за 2 раза: барабаны не берём, остальное — мягкий фейд в конце.
+    """Cut the loop s..e (beat indices), fit the tempo, cut exactly on the grid.
+    The boundaries sit on the real start of the hits; after cutting, the seam is checked: if the start
+    of the next hit got into the end, the end is moved earlier and the loop is cut again (in "Pitching" —
+    with a little more slowdown). Not fixed after 2 tries: drums are dropped, others get a soft fade-out.
+    Pads and vocals (crossfaded seam) are handled by _render_blended().
     opts: mode, bpm_min/max, fixed_bpm, max_stretch, normalize, kind."""
     bt = an.beat_times
     t0, t1 = onset_start(an, float(bt[s])), onset_start(an, float(bt[e]))
+    if opts.get("kind") in XFADE:
+        return _render_blended(an, t0, t1, e - s, opts)
     r, seam = None, "ok"
     for attempt in range(3):
         nr = _render_span(an, t0, t1, e - s, opts)
@@ -1059,17 +1192,34 @@ def render_loop(an: TrackAnalysis, s: int, e: int, opts: dict) -> dict | None:
             r["seam"] = seam
             return r
         seam = "shifted"
-        t1 -= leak * (t1 - t0) / len(r["audio"]) + 0.002     # длина утечки в секундах исходника
+        t1 -= leak * (t1 - t0) / len(r["audio"]) + 0.002     # length of the leak in source seconds
     if r is None:
         return None
     if opts.get("kind") == "drums":
-        return None                                           # чистые брейки: лучше взять другой кусок
+        return None                                           # clean breaks: better take another span
     r["audio"] = _fade_tail(r["audio"], tail_leak(r["audio"]) + SR // 500)
     r["seam"] = "fade"
     return r
 
 
+def _render_blended(an: TrackAnalysis, t0: float, t1: float, beats: int, opts: dict) -> dict | None:
+    """Pads and vocals. The end of such a loop crossfades into the sound right before its start
+    (_finish), so the wrap is continuous by construction. What can still be heard is an attack that
+    begins a few ms BEFORE the beat (soft chord, sung note): its beginning lies in the crossfade, is heard
+    at the very end of the loop and is cut by the restart — a click. Moving only the end doesn't help, so
+    both boundaries move to the real start of such attacks: the attack then belongs to the start of the
+    loop and the end stays quiet (in "Pitching" this gives a slightly stronger slowdown).
+    No tail fade here: on a crossfaded seam a fade only adds a dip right before the restart."""
+    a0, a1 = attack_start(an, t0), attack_start(an, t1)
+    r = _render_span(an, a0, a1, beats, opts)
+    if r is not None:
+        r["seam"] = "attack" if (t0 - a0 > 0.002 or t1 - a1 > 0.002) else "ok"
+    return r
+
+
 def _render_span(an: TrackAnalysis, t0: float, t1: float, beats: int, opts: dict) -> dict | None:
+    """Render the span t0..t1 (seconds, `beats` beats long) at the target tempo: pitching (varispeed)
+    or anchored time-stretch, then the seam (_finish), key and loop metadata."""
     real_bpm = 60.0 * beats / (t1 - t0)
     pick = choose_target(real_bpm, opts.get("bpm_min", 60), opts.get("bpm_max", 120),
                          opts.get("fixed_bpm"), opts.get("max_stretch", 0.05))
@@ -1080,10 +1230,10 @@ def _render_span(an: TrackAnalysis, t0: float, t1: float, beats: int, opts: dict
     out_len = int(round(named_beats * 60.0 / target * SR))
     xf = min(int(XFADE.get(opts.get("kind"), 0) * SR), out_len // 8)
 
-    pre = 0.003                                    # чуть до атаки, чтобы не съесть её начало
-    P0, P1 = (t0 - pre) * SR, (t1 - pre) * SR      # луп в сэмплах трека
+    pre = 0.003                                    # a bit before the attack, so its very beginning isn't eaten
+    P0, P1 = (t0 - pre) * SR, (t1 - pre) * SR      # the loop in track samples
     tuning_out = an.tuning
-    if opts.get("mode") == "vinyl":                # питчинг: темп меняется вместе с высотой
+    if opts.get("mode") == "vinyl":                # pitching: tempo changes together with pitch
         a = max(0, int(P0 - 0.3 * SR))
         z, real_ratio = varispeed(an.audio(a, P1 + 0.6 * SR), ratio)
         i0 = int(round((P0 - a) / real_ratio))
@@ -1091,8 +1241,8 @@ def _render_span(an: TrackAnalysis, t0: float, t1: float, beats: int, opts: dict
         head = z[max(0, i0 - xf):i0]
         tuning_out += 1200 * math.log2(real_ratio)
         engine = "pitch"
-    else:                                          # стретч: удары стоят на местах, высота та же
-        base = max(0, int(P0) - int(0.1 * SR))                 # только нужный кусок трека, не весь
+    else:                                          # stretching: hits stay in place, the pitch stays the same
+        base = max(0, int(P0) - int(0.1 * SR))                 # only the needed piece of the track, not all of it
         seg = an.audio(base, P1 + 0.1 * SR)
         anchors = [A - base for A in find_anchors(an, int(P0), int(P1))]
         loop = anchored_stretch(seg, P0 - base, P1 - base, anchors, (P1 - P0) / out_len, out_len)
@@ -1111,8 +1261,9 @@ def _render_span(an: TrackAnalysis, t0: float, t1: float, beats: int, opts: dict
 
 
 def render_free(an: TrackAnalysis, t0: float, bars: float, target: int, opts: dict) -> dict:
-    """Кусок вне сетки (пэды, вокал без бита): ровно bars тактов при target BPM, без растяжения
-    и без смены высоты — тянущемуся звуку темп не важен, важна длина. Стык бесшовный."""
+    """An off-grid span (pads, beatless vocals): exactly `bars` bars at target BPM, without stretching
+    and without a pitch change — tempo doesn't matter for a sustained sound, length does. Seamless:
+    the end crossfades into the sound before the start (no tail fade — it would add a dip)."""
     out_len = int(round(bars * 4 * 60.0 / target * SR))
     xf = min(int(XFADE.get(opts.get("kind"), 0.1) * SR), out_len // 8)
     P0 = max(xf, int(t0 * SR))
@@ -1120,13 +1271,10 @@ def render_free(an: TrackAnalysis, t0: float, bars: float, target: int, opts: di
     if len(loop) < out_len:
         loop = np.vstack([loop, np.zeros((out_len - len(loop), 2), np.float32)])
     loop = _finish(loop, an.audio(P0 - xf, P0), opts.get("normalize", True))
-    leak = tail_leak(loop)
-    if leak:                                                   # у тянущегося звука — мягкий фейд
-        loop = _fade_tail(loop, leak + SR // 500)
     t1 = (P0 + out_len) / SR
     return dict(audio=loop.astype(np.float32), **_loop_key(an, loop, P0 / SR, t1, an.tuning, opts.get("kind")),
                 bpm=int(target), real_bpm=None, stretch_pct=0.0, pitch_st=0, bars=float(bars), beats=bars * 4,
-                engine="cut", free=True, src_start=round(P0 / SR, 3), src_end=round(t1, 3), drums=False)
+                engine="cut", free=True, src_start=round(P0 / SR, 3), src_end=round(t1, 3), drums=False, seam="ok")
 
 
 def waveform_peaks(x: np.ndarray, n=240):

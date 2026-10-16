@@ -9,11 +9,12 @@ Full manual: [English](README_EN.txt) · [Русский](README.txt) · [Españ
 - Cuts loops exactly on the downbeats, 1, 2 or 4 bars, with a click check at the seam
 - Detects key and tempo, fits the tempo to a multiple of 5 BPM (60–120) by time-stretching or by pitching (like a turntable pitch fader)
 - Names files by key and tempo: `Gmaj110Quark1.wav`, `Amin95BQuark1.wav`
-- Loop types: any, breaks, melody, or isolated parts — drums only, bass only, vocals only, pads only
+- Loop types: any, breaks, melody, or isolated parts — drums only, bass only, vocals only, pads only (several types at once take turns, the cleanest first)
 - Plays several loops together in the window, in sync, so you can hear what fits; highlights compatible keys (Camelot)
 - Favorites, re-running a record with other settings, drag-and-drop of loops into a folder, ZIP export sorted for Model:Samples
 - Works with your own files too (vinyl rips): drop mp3 / wav / flac into the window
 - Interface in English, Russian and Spanish
+- Debugging mode: purity of every loop and a "wrong match" button that collects the loop and the analyzer's readings for tuning the detectors
 
 ## Quick start
 

@@ -1,4 +1,4 @@
-CRATEDIGGER 1.2.2 — sample digging for boom bap
+CRATEDIGGER 1.3 — sample digging for boom bap
 ===============================================
 (Русский: README.txt · Español: README_ES.txt)
 
@@ -79,12 +79,15 @@ HOW TO USE
 
 Useful settings:
   * "Breaks" — parts where the drums are up front; "Melody" — parts with more harmony.
-  * "Only:" drums / bass / vocals / pads (for 1–2 bar loops) — parts where only that
-    plays. You can pick several at once: they work as "or" (for example drums + bass —
+  * "Only:" drums / bass / vocals / pads (for 1, 2 and 4 bar loops) — parts where only
+    that plays. You can pick several at once: they work as "or" (for example drums + bass —
     each record gives both clean breaks and bare bass). Picking anything in this row
     turns off "Any / Breaks / Melody"; a click in the first row clears all "Only".
-    Order: first the clean parts of all chosen types (drums → bass → vocals → pads),
-    then the ones "with extras" — the loop caption says so ("bass with extras").
+    Loops of the chosen types take turns: the type with the cleanest part goes first,
+    then the types alternate (for example pads, drums, pads, drums); one type comes
+    several times in a row only when the others have nothing left. Inside a type the
+    clean parts come first, then the ones "with extras" — the loop caption says so
+    ("bass with extras"). "Loops per record" is the total for all chosen types together.
       drums  — drums alone, no bass, chords or voice (no sounds with a series of
                overtones, the level drops almost to silence between hits);
       bass   — the bass line up front, without kick and snare (including dark,
@@ -94,9 +97,19 @@ Useful settings:
                with light bass, choir, instruments or percussion;
       pads   — sustained chords and beds without bass, drums or a lead melody
                (reverb-smeared piano is a pad too; a one-note-at-a-time melody is not).
-               A low droning drone under the pad is allowed.
+               A low droning drone under the pad is allowed. A pad needs a tone:
+               noise without harmony (crowd, applause, talk, wind) is not a pad.
+               Pads with a melody on top come later in the queue.
+    Vocals and pads never have a repeating kick or snare — parts with a beat are
+    rejected even at slow tempos (a kick on beats 1 and 3).
+    The seam of pads and vocals: if a chord or a note starts slightly before the beat
+    (soft attack, reverb), the start and the end of the loop move to the real start of
+    the attack — the attack stays at the start of the loop and doesn't click at the end
+    (in "Pitching" this gives a little more slowdown). Vocals whose loudness at the start
+    and at the end differ a lot, and off-grid pads where something new comes in during
+    the last half second, are taken only if nothing else was found.
     Pads and vocals are also taken from beatless intros and from tracks with no rhythm
-    at all (ambient): such a part is cut to exactly 1–2 bars at the most common BPM
+    at all (ambient): such a part is cut to exactly 1, 2 or 4 bars at the most common BPM
     of this dig, without stretching, with a click-free seam. In "Stretching" vocals are
     fitted to the grid as much as needed (the pitch doesn't change), in "Pitching" —
     up to ±15 %. The key in the name of drums, bass and vocals is the song's key
@@ -113,10 +126,17 @@ Useful settings:
   * "Stretching" changes the tempo and keeps the pitch (hits stay in place). "Pitching" —
     like the pitch fader on a turntable or an MPC: tempo and pitch change together,
     usually by less than a semitone (vocals — up to ±15 %). The key in the name is recalculated.
-  * Years and BPM: the checkbox next to the label turns the filter on or off.
+  * Years and BPM: the checkbox next to the label turns the filter on or off
+    (both filters are off by default).
     Years off — recordings of any year are searched (modern ones included),
     BPM off — tracks are not rejected by tempo (fitting to a multiple of 5
     within 60–120 still applies). Loop length: 1, 2 or 4 bars.
+  * "Debugging" (in "More settings", off by default) — every loop shows its purity and
+    a 👎 wrong match button. If a loop's type is wrong (say "pads only", but it's crowd
+    noise or a beat), click it: a copy of the loop and all the analyzer's readings go to
+    the Feedback folder next to the crates (file feedback.jsonl). Zip that folder and send
+    it — it makes improving detection easy. A second click removes the mark.
+    Hover a loop's caption to see the detailed readings.
 
 
 SPEED AND MEMORY
@@ -141,6 +161,7 @@ Music/CrateDigger/<date>_<tags>/
   Chops/                 each loop cut into 8 parts (if enabled)
   MODEL_SAMPLES.txt      table: tempo, bars, steps for each loop
   credits.txt            where each loop comes from (artist, link, time in the track)
+Music/CrateDigger/Feedback/   loops marked 👎 in Debugging mode, and feedback.jsonl
 
 File name: key + BPM + title + loop number:  Amin95Quark2.wav
 Loops from "Only …" have a type letter after the BPM: D — drums, B — bass,

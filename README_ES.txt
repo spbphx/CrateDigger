@@ -1,4 +1,4 @@
-CRATEDIGGER 1.2.2 — excavar samples para boom bap
+CRATEDIGGER 1.3 — excavar samples para boom bap
 =================================================
 (Русский: README.txt · English: README_EN.txt)
 
@@ -79,12 +79,15 @@ CÓMO SE USA
 
 Ajustes útiles:
   * «Breaks» — partes donde la batería va al frente; «Melodía» — partes con más armonía.
-  * «Solo:» batería / bajo / voz / pads (para loops de 1–2 compases) — partes donde suena
-    solo eso. Puedes elegir varios: funcionan como «o» (por ejemplo, batería + bajo:
+  * «Solo:» batería / bajo / voz / pads (para loops de 1, 2 y 4 compases) — partes donde
+    suena solo eso. Puedes elegir varios: funcionan como «o» (por ejemplo, batería + bajo:
     de cada disco salen tanto breaks limpios como bajo solo). Elegir algo en esta fila
     desactiva «Cualquiera / Breaks / Melodía»; un clic en la primera fila quita todos los «Solo».
-    Orden: primero las partes limpias de todos los tipos elegidos (batería → bajo → voz → pads),
-    luego las «con extras»; lo indica la descripción del loop («bajo con extras»).
+    Los loops de los tipos elegidos se alternan: primero el tipo con la parte más limpia,
+    luego se turnan (por ejemplo pads, batería, pads, batería); un tipo se repite seguido
+    solo si los demás ya no tienen nada. Dentro de cada tipo van primero las partes limpias
+    y luego las «con extras»; lo indica la descripción del loop («bajo con extras»).
+    «Loops por disco» es el total para todos los tipos elegidos juntos.
       batería — solo batería, sin bajo, acordes ni voz (sin sonidos con serie de
                 armónicos; entre golpes el nivel cae casi al silencio);
       bajo    — la línea de bajo al frente, sin bombo ni caja (incluidos breaks
@@ -94,9 +97,19 @@ Ajustes útiles:
                 con bajo ligero, coro, instrumentos o percusión;
       pads    — acordes sostenidos y fondos sin bajo, percusión ni melodía principal
                 (un piano empapado de reverb también es pad; una melodía nota a nota no).
-                Se admite un dron grave bajo el pad.
+                Se admite un dron grave bajo el pad. Un pad necesita tono: el ruido
+                sin armonía (público, aplausos, charla, viento) no es un pad. Los pads
+                con una melodía encima van más tarde en la cola.
+    La voz y los pads nunca tienen un bombo o una caja que se repiten: las partes con
+    ritmo se descartan incluso a tempos lentos (bombo en el 1 y el 3).
+    La unión de pads y voz: si un acorde o una nota empiezan un poco antes del tiempo
+    (ataque suave, reverb), el inicio y el final del loop se mueven al inicio real del
+    ataque: el ataque queda al principio del loop y no hace clic al final (en «Pitching»
+    esto da un poco más de ralentización). La voz con un volumen muy distinto al principio
+    y al final, y los pads sin rejilla donde algo nuevo entra en el último medio segundo,
+    solo se toman si no se encontró nada más.
     Los pads y la voz también se toman de intros sin ritmo y de pistas totalmente sin ritmo
-    (ambient): esa parte se corta a 1–2 compases exactos al BPM más frecuente de esta
+    (ambient): esa parte se corta a 1, 2 o 4 compases exactos al BPM más frecuente de esta
     excavación, sin estirar, con una unión sin clic. En «Stretching» la voz se ajusta a la
     rejilla todo lo necesario (la altura no cambia), en «Pitching», hasta ±15 %.
     La tonalidad en el nombre de batería, bajo y voz es la de la canción (con una sola línea
@@ -113,10 +126,17 @@ Ajustes útiles:
   * «Stretching» cambia el tempo y conserva la altura (los golpes quedan en su sitio).
     «Pitching» — como el pitch de un tocadiscos o una MPC: el tempo cambia junto con la
     altura, normalmente menos de un semitono (la voz, hasta ±15 %). La tonalidad del nombre se recalcula.
-  * Años y BPM: la casilla junto al título activa o desactiva el filtro.
+  * Años y BPM: la casilla junto al título activa o desactiva el filtro
+    (por defecto ambos filtros están desactivados).
     Años desactivados: se buscan grabaciones de cualquier año (también modernas);
     BPM desactivado: las pistas no se descartan por tempo (el ajuste a múltiplos de 5
     dentro de 60–120 se mantiene). Duración del loop: 1, 2 o 4 compases.
+  * «Depuración (Debugging)» (en «Más ajustes», desactivada por defecto): cada loop muestra
+    su pureza y un botón 👎 wrong match. Si el tipo de un loop está mal (por ejemplo «solo
+    pads», pero es ruido de público o un ritmo), púlsalo: una copia del loop y todas las
+    lecturas del analizador van a la carpeta Feedback junto a las cajas (archivo
+    feedback.jsonl). Comprime esa carpeta y envíala: así es fácil mejorar la detección.
+    Otro clic quita la marca. Pasa el ratón por la descripción del loop para ver los detalles.
 
 
 VELOCIDAD Y MEMORIA
@@ -141,6 +161,7 @@ Music/CrateDigger/<fecha>_<etiquetas>/
   Chops/                 cada loop cortado en 8 partes (si está activado)
   MODEL_SAMPLES.txt      tabla: tempo, compases y pasos de cada loop
   credits.txt            de dónde sale cada loop (artista, enlace, tiempo en la pista)
+Music/CrateDigger/Feedback/   loops marcados con 👎 en modo depuración, y feedback.jsonl
 
 Nombre del archivo: tonalidad + BPM + título + número de loop:  Amin95Quark2.wav
 Los loops de «Solo …» llevan una letra de tipo tras el BPM: D — batería, B — bajo,

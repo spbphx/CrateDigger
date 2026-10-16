@@ -1,6 +1,6 @@
 """
-Ставит и обновляет всё нужное внутри папки .venv (ничего не трогает в системе).
-Вызывается start-файлами перед запуском программы.
+Installs and updates everything needed inside the .venv folder (touches nothing in the system).
+Called by the start files before the program runs.
 """
 import hashlib
 import json
@@ -14,7 +14,7 @@ REQ = HERE / "requirements.txt"
 MARK = Path(sys.prefix) / ".cratedigger_req"
 UPD = Path(sys.prefix) / ".cratedigger_update"
 
-# сообщения на языке, выбранном в программе (флажки в шапке); до первого выбора — русский
+# messages in the language chosen in the program (flags in the header); Russian until a choice is made
 MSG = {
     "old": ("Нужен Python 3.10 или новее. Сейчас:", "Python 3.10 or newer is required. Current:",
             "Hace falta Python 3.10 o más reciente. Ahora:"),
@@ -37,6 +37,7 @@ MSG = {
 
 
 def msg(key):
+    """A message of the installer in the chosen language (key of MSG)."""
     try:
         lang = json.loads((HERE / "settings.json").read_text("utf8")).get("lang")
     except Exception:
@@ -45,11 +46,13 @@ def msg(key):
 
 
 def pip(*args, timeout=None):
+    """Run pip of this Python with the given arguments. -> exit code"""
     cmd = [sys.executable, "-m", "pip", "--disable-pip-version-check", *args]
     return subprocess.run(cmd, timeout=timeout).returncode
 
 
 def main():
+    """Install the libraries on the first run (or after requirements change); update yt-dlp daily."""
     if sys.version_info < (3, 10):
         print(msg("old"), sys.version.split()[0])
         print(msg("get"))
@@ -68,7 +71,7 @@ def main():
         UPD.write_text(str(time.time()))
         return
 
-    # YouTube часто меняется — раз в сутки тихо обновляем yt-dlp
+    # YouTube changes often — quietly update yt-dlp once a day
     try:
         last = float(UPD.read_text()) if UPD.exists() else 0
     except ValueError:

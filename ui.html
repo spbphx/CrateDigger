@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -20,12 +20,12 @@ button,input,select{font:inherit;color:inherit}
 .app{display:grid;grid-template-columns:380px 1fr;min-height:100vh}
 @media (max-width:900px){.app{grid-template-columns:1fr}}
 
-/* ---------- левая панель: прилавок */
+/* ---------- left panel: the counter (search settings) */
 .counter{background:var(--panel);border-right:1px solid var(--line);padding:28px 26px 120px;position:sticky;top:0;height:100vh;overflow:auto}
 @media (max-width:900px){.counter{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line);padding-bottom:28px}}
 .brand{font-stretch:62%;font-weight:900;font-size:44px;line-height:.9;letter-spacing:-.5px;margin:0 0 4px}
 .tagline{font-size:14px;line-height:1.4;color:var(--soft);margin:10px 0 0}
-/* флажки языка в шапке */
+/* language flags in the header */
 .langs{display:flex;gap:8px;margin:-8px 0 14px}
 .langs button{width:27px;height:18px;padding:0;border:1px solid rgba(0,0,0,.18);border-radius:3px;overflow:hidden;cursor:pointer;background:#fff;opacity:.45;filter:saturate(.35);transition:opacity .15s,filter .15s}
 .langs button:hover{opacity:.85;filter:none}
@@ -66,7 +66,7 @@ summary{cursor:pointer;font-weight:600}
 .drop{margin-top:12px;border:2px dashed var(--line);border-radius:var(--r-sm);padding:14px;font-size:13.5px;color:var(--soft);text-align:center;cursor:pointer}
 .drop.over,.drop:hover{border-color:var(--cobalt);color:var(--ink)}
 .drop small{display:block;margin-top:6px;font-size:12.5px}
-/* повторный прогон: пластинку из списка тащат в левую колонку */
+/* re-run: a record from the list is dragged into the left column */
 .counter.take{background:#F2F4FF;box-shadow:inset 0 0 0 3px var(--cobalt)}
 .counter.take .drop{border-style:solid;border-color:var(--cobalt);background:#fff;color:var(--ink);font-weight:600}
 .sleeve[draggable=true],.rtitle[draggable=true]{cursor:grab}
@@ -77,7 +77,7 @@ summary{cursor:pointer;font-weight:600}
 .diag{margin-top:18px;font-size:12px;color:var(--soft)}
 .diag b{color:var(--warn);font-weight:600}
 
-/* ---------- правая часть: ящик */
+/* ---------- right part: the crate (records and loops) */
 .crate{padding:28px 32px 140px;min-width:0}
 @media (max-width:600px){.crate{padding:20px 16px 140px}}
 .bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:18px}
@@ -121,7 +121,7 @@ canvas.wave{width:100%;height:46px;display:block;cursor:pointer}
 .icon:hover{border-color:var(--line);color:var(--ink)}
 .icon.on{color:#C08A00}
 
-/* ---------- джем-панель */
+/* ---------- jam bar at the bottom */
 .jam{position:fixed;left:380px;right:0;bottom:0;background:var(--ink);color:#fff;padding:12px 28px;display:flex;gap:18px;align-items:center;flex-wrap:wrap}
 @media (max-width:900px){.jam{left:0;padding:10px 16px}}
 .jam .tempo{font-stretch:62%;font-weight:900;font-size:30px;line-height:1;min-width:110px}
@@ -145,6 +145,13 @@ canvas.wave{width:100%;height:46px;display:block;cursor:pointer}
 .pending{color:var(--soft);padding:18px 0;margin:0}
 .icon svg{width:16px;height:16px;vertical-align:-2px}
 .icon.trash:hover{color:var(--warn)}
+/* Debugging mode (checkbox in More settings): purity and the "wrong match" button */
+.dbgonly{display:none}
+body.debug .dbgonly{display:inline}
+body.debug .icon.dbgonly{display:inline-block}
+.icon.wrong{font-size:15px;filter:grayscale(1);opacity:.7}
+.icon.wrong.on{filter:none;opacity:1;border-color:var(--warn);background:#FBEAE5}
+.purity{color:var(--ink);font-weight:600}
 @media (max-width:900px){.toast{bottom:190px}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
@@ -158,54 +165,56 @@ canvas.wave{width:100%;height:46px;display:block;cursor:pointer}
         <button data-lang="es" title="Español" aria-label="Español"><svg viewBox="0 0 3 2" preserveAspectRatio="none" aria-hidden="true"><rect width="3" height="2" fill="#AA151B"/><rect y=".5" width="3" height="1" fill="#F1BF00"/></svg></button>
     </div>
     <h1 class="brand">CrateDigger</h1>
-    <p class="tagline" data-i18n="tagline">Пластинки с YouTube Music, нарезанные в ровные лупы</p>
+    <p class="tagline" data-i18n="tagline">Records from YouTube Music, chopped into tight loops</p>
 
-    <label class="ask" for="tags" data-i18n="ask">Что ищем в ящике?</label>
+    <label class="ask" for="tags" data-i18n="ask">What are we digging for?</label>
     <input id="tags" class="tags" placeholder="soul, rhodes, 1973" autocomplete="off">
-    <label class="check rare"><input type="checkbox" id="rare"><span data-i18n="rare">Искать редкие</span></label>
+    <label class="check rare"><input type="checkbox" id="rare"><span data-i18n="rare">Look for rare ones</span></label>
     <div class="chips" id="chips"></div>
-    <p class="hint" data-i18n="tagsHint">Оставьте пустым — будут случайные пластинки</p>
+    <p class="hint" data-i18n="tagsHint">Leave empty for random records</p>
 
     <div class="row">
-      <div class="field"><label for="n_tracks" data-i18n="nTracks">Пластинок</label><input id="n_tracks" type="number" min="1" max="20" value="5"></div>
-      <div class="field"><label for="n_loops" data-i18n="nLoops">Лупов с каждой</label><input id="n_loops" type="number" min="1" max="8" value="3"></div>
+      <div class="field"><label for="n_tracks" data-i18n="nTracks">Records</label><input id="n_tracks" type="number" min="1" max="20" value="5"></div>
+      <div class="field"><label for="n_loops" data-i18n="nLoops">Loops per record</label><input id="n_loops" type="number" min="1" max="8" value="3"></div>
     </div>
-    <div class="field" style="margin-top:16px"><label data-i18n="barsLab">Длина лупа</label>
-      <div class="seg" id="bars"><button data-v="1" data-i18n="bar1">1 такт</button><button data-v="2" data-i18n="bar2">2 такта</button><button data-v="4" data-i18n="bar4">4 такта</button></div></div>
-    <div class="field" style="margin-top:16px"><label data-i18n="preferLab">Какие лупы искать</label>
-      <div class="seg" id="prefer"><button data-v="any" data-i18n="any">Любые</button><button data-v="breaks" data-i18n="breaks">Брейки</button><button data-v="melodic" data-i18n="melodic">Мелодия</button></div>
-      <div class="onlyrow"><span class="flabel" id="onlyLab" data-i18n="onlyLab">Только:</span>
-        <div class="seg" id="only" role="group" aria-labelledby="onlyLab"><button data-k="drums" data-i18n="k_drums">барабаны</button><button data-k="bass" data-i18n="k_bass">бас</button><button data-k="vocal" data-i18n="k_vocal">вокал</button><button data-k="pads" data-i18n="k_pads">пэды</button></div></div>
+    <div class="field" style="margin-top:16px"><label data-i18n="barsLab">Loop length</label>
+      <div class="seg" id="bars"><button data-v="1" data-i18n="bar1">1 bar</button><button data-v="2" data-i18n="bar2">2 bars</button><button data-v="4" data-i18n="bar4">4 bars</button></div></div>
+    <div class="field" style="margin-top:16px"><label data-i18n="preferLab">What loops to look for</label>
+      <div class="seg" id="prefer"><button data-v="any" data-i18n="any">Any</button><button data-v="breaks" data-i18n="breaks">Breaks</button><button data-v="melodic" data-i18n="melodic">Melody</button></div>
+      <div class="onlyrow"><span class="flabel" id="onlyLab" data-i18n="onlyLab">Only:</span>
+        <div class="seg" id="only" role="group" aria-labelledby="onlyLab"><button data-k="drums" data-i18n="k_drums">drums</button><button data-k="bass" data-i18n="k_bass">bass</button><button data-k="vocal" data-i18n="k_vocal">vocals</button><button data-k="pads" data-i18n="k_pads">pads</button></div></div>
       <p class="hint" id="preferHint" hidden></p></div>
     <div class="row">
-      <div class="field"><label class="flabel" data-i18n-title="yearsTitle"><input type="checkbox" id="year_filter" checked onchange="syncFilters()"><span data-i18n="years">Годы</span></label><div class="pair" id="yearsPair"><input id="y0" type="number" min="1940" max="2025" value="1960"><span>–</span><input id="y1" type="number" min="1940" max="2025" value="1999"></div></div>
-      <div class="field"><label class="flabel" data-i18n-title="bpmTitle"><input type="checkbox" id="bpm_filter" checked onchange="syncFilters()">BPM</label><div class="pair" id="bpmPair"><input id="bpm_min" type="number" min="60" max="120" step="5" value="60"><span>–</span><input id="bpm_max" type="number" min="60" max="120" step="5" value="120"></div></div>
+      <div class="field"><label class="flabel" data-i18n-title="yearsTitle"><input type="checkbox" id="year_filter" onchange="syncFilters()"><span data-i18n="years">Years</span></label><div class="pair" id="yearsPair"><input id="y0" type="number" min="1940" max="2025" value="1960"><span>–</span><input id="y1" type="number" min="1940" max="2025" value="1999"></div></div>
+      <div class="field"><label class="flabel" data-i18n-title="bpmTitle"><input type="checkbox" id="bpm_filter" onchange="syncFilters()">BPM</label><div class="pair" id="bpmPair"><input id="bpm_min" type="number" min="60" max="120" step="5" value="60"><span>–</span><input id="bpm_max" type="number" min="60" max="120" step="5" value="120"></div></div>
     </div>
-    <div class="field" style="margin-top:16px"><label data-i18n="modeLab">Подгонка темпа до кратного 5</label>
-      <div class="seg" id="mode"><button data-v="stretch" data-i18n="stretch">Стретчинг</button><button data-v="vinyl" data-i18n="vinyl">Питчинг</button></div>
+    <div class="field" style="margin-top:16px"><label data-i18n="modeLab">Tempo fit to a multiple of 5</label>
+      <div class="seg" id="mode"><button data-v="stretch" data-i18n="stretch">Stretching</button><button data-v="vinyl" data-i18n="vinyl">Pitching</button></div>
       <p class="hint" id="modeHint"></p></div>
 
     <details>
-      <summary data-i18n="more">Ещё настройки</summary>
-      <div class="field" style="margin-top:12px"><label for="formats" data-i18n="formatsLab">Какие файлы сохранять</label>
-        <select id="formats"><option value="stereo" data-i18n="fmtStereo">Только стерео 24 бит</option><option value="both" data-i18n="fmtBoth">Стерео 24 бит + моно 16 бит для Model:Samples</option><option value="mono" data-i18n="fmtMono">Только моно для Model:Samples</option></select></div>
-      <label class="check"><input type="checkbox" id="save_mp3" checked><span data-i18n="saveMp3">Сохранять исходный трек (нужен для повторного прогона)</span></label>
-      <label class="check"><input type="checkbox" id="sort_ms"><span data-i18n="sortMs">Разложить моно-файлы для Model:Samples по папкам: тональность, внутри — BPM</span></label>
-      <label class="check"><input type="checkbox" id="chops"><span data-i18n="chops">Нарезать каждый луп на 8 чопов</span></label>
-      <label class="check"><input type="checkbox" id="normalize" checked><span data-i18n="normalize">Выравнивать громкость лупов</span></label>
-      <label class="check"><input type="checkbox" id="strict_year"><span data-i18n="strictYear">Строго проверять год записи (меньше находок, зато без переизданий-«новоделов»)</span></label>
+      <summary data-i18n="more">More settings</summary>
+      <div class="field" style="margin-top:12px"><label for="formats" data-i18n="formatsLab">Files to save</label>
+        <select id="formats"><option value="stereo" data-i18n="fmtStereo">Stereo 24-bit only</option><option value="both" data-i18n="fmtBoth">Stereo 24-bit + mono 16-bit for Model:Samples</option><option value="mono" data-i18n="fmtMono">Mono for Model:Samples only</option></select></div>
+      <label class="check"><input type="checkbox" id="save_mp3" checked><span data-i18n="saveMp3">Keep the source track (needed to re-run)</span></label>
+      <label class="check"><input type="checkbox" id="sort_ms"><span data-i18n="sortMs">Sort mono files for Model:Samples into folders: key, then BPM</span></label>
+      <label class="check"><input type="checkbox" id="chops"><span data-i18n="chops">Chop every loop into 8 slices</span></label>
+      <label class="check"><input type="checkbox" id="normalize" checked><span data-i18n="normalize">Even out loop loudness</span></label>
+      <label class="check"><input type="checkbox" id="strict_year"><span data-i18n="strictYear">Strict recording-year check (fewer finds, but no modern re-recordings)</span></label>
       <div class="row">
-        <div class="field"><label for="title_len" data-i18n="titleLen">Длина названия в имени файла</label><input id="title_len" type="number" min="6" max="60" value="20"></div>
-        <div class="field"><label for="cookies_browser" data-i18n="cookiesLab">Cookies из браузера</label>
-          <select id="cookies_browser"><option value="" data-i18n="cookiesAuto">Автоматически</option><option value="firefox">Firefox</option><option value="chrome">Chrome</option><option value="edge">Edge</option><option value="safari">Safari</option><option value="brave">Brave</option><option value="opera">Opera</option></select></div>
+        <div class="field"><label for="title_len" data-i18n="titleLen">Title length in name</label><input id="title_len" type="number" min="6" max="60" value="20"></div>
+        <div class="field"><label for="cookies_browser" data-i18n="cookiesLab">Browser cookies</label>
+          <select id="cookies_browser"><option value="" data-i18n="cookiesAuto">Automatic</option><option value="firefox">Firefox</option><option value="chrome">Chrome</option><option value="edge">Edge</option><option value="safari">Safari</option><option value="brave">Brave</option><option value="opera">Opera</option></select></div>
       </div>
-      <p class="hint" data-i18n="cookiesHint">Если YouTube спросит «подтвердите, что вы не бот», программа сама возьмёт cookies из Firefox (или другого браузера, где вы заходили на YouTube) и запомнит выбор. Лучше всего, если в Firefox вы вошли в свой аккаунт Google.</p>
-      <div class="field" style="margin-top:12px"><label for="out_dir" data-i18n="outDir">Папка для лупов</label>
-        <div class="pair"><input id="out_dir"><button class="ghost" id="saveDir" data-i18n="saveDir">Сохранить</button></div></div>
+      <p class="hint" data-i18n="cookiesHint">If YouTube asks you to confirm you're not a bot, the program takes cookies from Firefox (or another browser where you've used YouTube) by itself and remembers the choice. It works best if you're signed in to your Google account in Firefox.</p>
+      <div class="field" style="margin-top:12px"><label for="out_dir" data-i18n="outDir">Loops folder</label>
+        <div class="pair"><input id="out_dir"><button class="ghost" id="saveDir" data-i18n="saveDir">Save</button></div></div>
+      <label class="check"><input type="checkbox" id="debug"><span data-i18n="debugLab">Debugging</span></label>
+      <p class="hint" data-i18n="debugHint">Shows the purity of every loop and a 👎 wrong match button.</p>
     </details>
 
-    <button class="go" id="go" data-i18n="dig">Копать</button>
-    <div class="drop" id="drop" tabindex="0" role="button"><span id="dropText"></span><small id="dropSub" data-i18n="dropSub"></small><input type="file" id="pick" accept="audio/*,.flac,.aif,.aiff" multiple hidden></div>
+    <button class="go" id="go" data-i18n="dig">Dig</button>
+    <div class="drop" id="drop" tabindex="0" role="button"><span id="dropText"></span><small id="dropSub" data-i18n="dropSub">You can also drag a record from the list on the right here by its cover or title — I'll re-run it with the current settings</small><input type="file" id="pick" accept="audio/*,.flac,.aif,.aiff" multiple hidden></div>
     <div class="diag" id="diag"></div>
   </aside>
 
@@ -213,13 +222,13 @@ canvas.wave{width:100%;height:46px;display:block;cursor:pointer}
     <div class="bar">
       <h2 id="crateTitle"></h2>
       <select class="ghost" id="history" data-i18n-aria="historyPh"><option value=""></option></select>
-      <button class="ghost" id="openDir" data-i18n="openDir">Открыть папку</button>
-      <button class="ghost" id="clearScreen" data-i18n="clearScreen">Очистить экран</button>
+      <button class="ghost" id="openDir" data-i18n="openDir">Open folder</button>
+      <button class="ghost" id="clearScreen" data-i18n="clearScreen">Clear screen</button>
     </div>
     <div class="progress" id="progress" hidden>
       <div class="cur" id="cur"></div>
       <div class="meter"><i id="meter"></i></div>
-      <details id="logBox"><summary style="font-weight:400;font-size:13px" data-i18n="log">Журнал</summary><div class="log" id="log"></div></details>
+      <details id="logBox"><summary style="font-weight:400;font-size:13px" data-i18n="log">Log</summary><div class="log" id="log"></div></details>
     </div>
     <div id="records"></div>
   </main>
@@ -227,11 +236,11 @@ canvas.wave{width:100%;height:46px;display:block;cursor:pointer}
 
 <div class="jam" id="jam">
   <div class="tempo" id="jamTempo"></div>
-  <label data-i18n-title="syncTitle"><input type="checkbox" id="syncRate" checked><span data-i18n="syncRate">Темп по первому лупу</span></label>
-  <label><span data-i18n="volume">Громкость</span> <input type="range" id="vol" min="0" max="1" step="0.01" value="0.85"></label>
-  <button class="ghost" id="stopAll" data-i18n="stopAll">Остановить всё</button>
+  <label data-i18n-title="syncTitle"><input type="checkbox" id="syncRate" checked><span data-i18n="syncRate">Tempo from first loop</span></label>
+  <label><span data-i18n="volume">Volume</span> <input type="range" id="vol" min="0" max="1" step="0.01" value="0.85"></label>
+  <button class="ghost" id="stopAll" data-i18n="stopAll">Stop all</button>
   <button class="zip" id="zipBtn" disabled data-i18n-title="zipTitle"></button>
-  <span class="jamhint" data-i18n="jamHint"></span>
+  <span class="jamhint" data-i18n="jamHint">You can play several loops — the next ones come in at the top of the bar. Space stops everything.</span>
 </div>
 <div class="toast" id="toast"></div>
 
@@ -240,7 +249,8 @@ const $ = s => document.querySelector(s);
 const CHIPS = ["jungle","jazz funk","soul","library","bass","drum break","1972"];
 let logSince = 0, polling = null, lastStatus = "idle", scrollToNew = false, lastSnap = null, healthInfo = null;
 
-/* ------------ языки: русский, английский, испанский */
+/* ------------ languages: English, Russian, Spanish. Static text uses data-i18n* attributes,
+   generated text calls t(key, {vars}); pl(n, key) picks the plural form. */
 const I18N = {
 ru: {
   tagline:"Пластинки с YouTube Music, нарезанные в ровные лупы", ask:"Что ищем в ящике?", rare:"Искать редкие",
@@ -248,8 +258,7 @@ ru: {
   barsLab:"Длина лупа", bar1:"1 такт", bar2:"2 такта", bar4:"4 такта",
   preferLab:"Какие лупы искать", any:"Любые", breaks:"Брейки", melodic:"Мелодия", onlyLab:"Только:",
   k_drums:"барабаны", k_bass:"бас", k_vocal:"вокал", k_pads:"пэды",
-  onlyHint:"Лупы с одиночными инструментами (можно выбрать несколько, отбираются первые попавшиеся подходящие под один из выбранных типов)",
-  only4:"Только для лупов в 1 или 2 такта", onlyOff:"«Только …» работает с лупами в 1–2 такта — выключил",
+  onlyHint:"Лупы с одиночными инструментами (можно выбрать несколько — лупы выбранных типов идут по очереди, сначала самые чистые)",
   years:"Годы", yearsTitle:"Выключите, чтобы искать записи любых лет", bpmTitle:"Выключите, чтобы не отбрасывать треки по темпу",
   modeLab:"Подгонка темпа до кратного 5", stretch:"Стретчинг", vinyl:"Питчинг",
   hintVinyl:"Темп меняется вместе с высотой, как ручкой pitch на вертушке или MPC",
@@ -299,6 +308,9 @@ ru: {
   noYtdlp:"<b>yt-dlp не установлен</b> — запустите через start-файл", noDeno:"<b>нет Deno</b> — YouTube может не отдавать звук",
   noFfmpeg:"<b>нет ffmpeg</b>", jsEngine:"JS-движок для YouTube",
   million:"{n} млн", thousand:"{n} тыс.",
+  debugLab:"Отладка (Debugging)", debugHint:"Показывает у каждого лупа процент чистоты и кнопку 👎 wrong match: она кладёт луп и показания анализатора в папку Feedback — по ним можно улучшать распознавание. Наведите на подпись лупа, чтобы увидеть подробности.",
+  purity:"чистота {p}%", wrongTitle:"👎 Неверно распознан — сохранить луп и показания анализатора в папку Feedback", wrongOnTitle:"Отмечен как неверный — нажмите, чтобы снять отметку", wrongAria:"Неверно распознан",
+  wrongAdded:"Отмечен как неверный: луп и показания — в {d}", wrongRemoved:"Отметка снята", dbgGrade:"оценка", dbgSeam:"стык", dbgPos:"в треке",
   loops:["луп","лупа","лупов"], bars:["такт","такта","тактов"], steps:["шаг","шага","шагов"],
 },
 en: {
@@ -307,8 +319,7 @@ en: {
   barsLab:"Loop length", bar1:"1 bar", bar2:"2 bars", bar4:"4 bars",
   preferLab:"What loops to look for", any:"Any", breaks:"Breaks", melodic:"Melody", onlyLab:"Only:",
   k_drums:"drums", k_bass:"bass", k_vocal:"vocals", k_pads:"pads",
-  onlyHint:"Loops with a single instrument (you can pick several; the first parts that fit any of the chosen types are taken)",
-  only4:"Only for 1- or 2-bar loops", onlyOff:"“Only …” works with 1–2 bar loops — turned it off",
+  onlyHint:"Loops with a single instrument (you can pick several — loops of the chosen types take turns, the cleanest first)",
   years:"Years", yearsTitle:"Turn off to search recordings from any year", bpmTitle:"Turn off to keep tracks of any tempo",
   modeLab:"Tempo fit to a multiple of 5", stretch:"Stretching", vinyl:"Pitching",
   hintVinyl:"Tempo and pitch change together, like the pitch fader on a turntable or an MPC",
@@ -358,6 +369,9 @@ en: {
   noYtdlp:"<b>yt-dlp is not installed</b> — launch via the start file", noDeno:"<b>no Deno</b> — YouTube may refuse to give audio",
   noFfmpeg:"<b>no ffmpeg</b>", jsEngine:"JS engine for YouTube",
   million:"{n}M", thousand:"{n}K",
+  debugLab:"Debugging", debugHint:"Shows the purity of every loop and a 👎 wrong match button: it puts the loop and the analyzer's readings into the Feedback folder, which helps improve detection. Hover a loop's caption to see the details.",
+  purity:"purity {p}%", wrongTitle:"👎 Wrong match — save the loop and the analyzer's readings to the Feedback folder", wrongOnTitle:"Marked as a wrong match — click to unmark", wrongAria:"Wrong match",
+  wrongAdded:"Marked as a wrong match: the loop and its readings are in {d}", wrongRemoved:"Mark removed", dbgGrade:"grade", dbgSeam:"seam", dbgPos:"in track",
   loops:["loop","loops"], bars:["bar","bars"], steps:["step","steps"],
 },
 es: {
@@ -366,8 +380,7 @@ es: {
   barsLab:"Duración del loop", bar1:"1 compás", bar2:"2 compases", bar4:"4 compases",
   preferLab:"Qué loops buscar", any:"Cualquiera", breaks:"Breaks", melodic:"Melodía", onlyLab:"Solo:",
   k_drums:"batería", k_bass:"bajo", k_vocal:"voz", k_pads:"pads",
-  onlyHint:"Loops con un solo instrumento (puedes elegir varios; se toman las primeras partes que encajen con alguno de los tipos elegidos)",
-  only4:"Solo para loops de 1 o 2 compases", onlyOff:"«Solo …» funciona con loops de 1–2 compases: lo he desactivado",
+  onlyHint:"Loops con un solo instrumento (puedes elegir varios: los loops de los tipos elegidos se alternan, primero los más limpios)",
   years:"Años", yearsTitle:"Desactívalo para buscar grabaciones de cualquier año", bpmTitle:"Desactívalo para no descartar pistas por tempo",
   modeLab:"Ajuste de tempo a múltiplos de 5", stretch:"Stretching", vinyl:"Pitching",
   hintVinyl:"El tempo cambia junto con la altura, como el pitch de un tocadiscos o una MPC",
@@ -417,6 +430,9 @@ es: {
   noYtdlp:"<b>yt-dlp no está instalado</b>: ábrelo con el archivo de inicio", noDeno:"<b>falta Deno</b>: YouTube puede no entregar el audio",
   noFfmpeg:"<b>falta ffmpeg</b>", jsEngine:"Motor JS para YouTube",
   million:"{n} M", thousand:"{n} mil",
+  debugLab:"Depuración (Debugging)", debugHint:"Muestra la pureza de cada loop y un botón 👎 wrong match: guarda el loop y las lecturas del analizador en la carpeta Feedback, lo que ayuda a mejorar la detección. Pasa el ratón por la descripción del loop para ver los detalles.",
+  purity:"pureza {p}%", wrongTitle:"👎 Mal detectado: guardar el loop y las lecturas del analizador en la carpeta Feedback", wrongOnTitle:"Marcado como mal detectado: pulsa para quitar la marca", wrongAria:"Mal detectado",
+  wrongAdded:"Marcado como mal detectado: el loop y sus lecturas están en {d}", wrongRemoved:"Marca quitada", dbgGrade:"nota", dbgSeam:"unión", dbgPos:"en la pista",
   loops:["loop","loops"], bars:["compás","compases"], steps:["paso","pasos"],
 }};
 const LANGS = ["en","ru","es"];
@@ -427,7 +443,7 @@ function t(key, vars){
   if(vars) s = s.replace(/\{(\w+)\}/g, (m,k)=> vars[k] ?? m);
   return s;
 }
-function pl(n, key){                 // форма слова по числу: 1 луп, 2 лупа, 5 лупов / 1 loop, 2 loops
+function pl(n, key){                 // word form by number: 1 loop, 2 loops (Russian has three forms)
   const f = I18N[LANG][key] || I18N.ru[key];
   if(f.length===2) return n===1 ? f[0] : f[1];
   const m10=n%10, m100=n%100;
@@ -452,19 +468,19 @@ function setLang(l){
   LANG = l;
   try{ localStorage.setItem("cd_lang", l); }catch(e){}
   applyLang();
-  api("/api/settings", {lang:l});         // журнал, ошибки и файлы ящика — на этом же языке
+  api("/api/settings", {lang:l});         // the log, errors and crate files follow the same language
 }
 document.querySelectorAll(".langs button").forEach(b=>b.onclick = ()=>setLang(b.dataset.lang));
 
-/* ------------ форма */
+/* ------------ the settings form */
 const KINDS = ["drums","bass","vocal","pads"];
 const kindName = k => t("k_"+k);
-const onlySel = new Set();      // «Только …» — можно несколько, работают как ИЛИ
+const onlySel = new Set();      // "Only ..." — several can be selected, they work as OR
 function seg(id, val){
   const box = $("#"+id);
   box.querySelectorAll("button").forEach(b=>{
     b.setAttribute("aria-pressed", b.dataset.v==String(val));
-    b.onclick = ()=>{ if(id==="prefer") onlySel.clear(); seg(id, b.dataset.v); };   // первый ряд снимает «Только»
+    b.onclick = ()=>{ if(id==="prefer") onlySel.clear(); seg(id, b.dataset.v); };   // a click in the first row clears "Only"
   });
   box.dataset.value = val;
   if(id==="bars" || id==="prefer") syncOnly(id);
@@ -474,18 +490,9 @@ $("#only").querySelectorAll("button").forEach(b=>b.onclick = ()=>{
   onlySel.has(b.dataset.k) ? onlySel.delete(b.dataset.k) : onlySel.add(b.dataset.k);
   syncOnly("only");
 });
-function syncOnly(changed){
-  const four = $("#bars").dataset.value==="4";
-  if(four && onlySel.size){
-    onlySel.clear();
-    if(changed==="bars") toast(t("onlyOff"));
-  }
-  $("#only").querySelectorAll("button").forEach(b=>{
-    b.disabled = four;
-    b.title = four ? t("only4") : "";
-    b.setAttribute("aria-pressed", onlySel.has(b.dataset.k));
-  });
-  const on = onlySel.size > 0;     // выбран хоть один «Только» — первый ряд выключен
+function syncOnly(){
+  $("#only").querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed", onlySel.has(b.dataset.k)));
+  const on = onlySel.size > 0;     // at least one "Only" selected — the first row is off
   $("#prefer").querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed", !on && b.dataset.v===$("#prefer").dataset.value));
   const hint = $("#preferHint");
   hint.hidden = !on;
@@ -520,7 +527,7 @@ function fill(p){
   for(const k of ["save_mp3","chops","normalize","strict_year","rare","sort_ms","year_filter","bpm_filter"]) if(p[k]!==undefined) $("#"+k).checked=!!p[k];
   syncFilters();
   onlySel.clear(); (p.only||[]).forEach(k=>onlySel.add(k));
-  if(p.prefer==="drums"){ onlySel.add("drums"); p.prefer = "any"; }     // настройки версии 1.0
+  if(p.prefer==="drums"){ onlySel.add("drums"); p.prefer = "any"; }     // settings of version 1.0
   seg("bars", p.bars||2); seg("prefer", p.prefer||"any"); seg("mode", p.mode||"stretch");
 }
 const api = async (path, body) => {
@@ -534,16 +541,16 @@ function toast(msg, actLabel, act){
   el.style.display="flex"; clearTimeout(el._t); el._t=setTimeout(()=>el.style.display="none", actLabel?6000:2400);
 }
 
-/* ------------ копание */
+/* ------------ digging */
 $("#go").onclick = async ()=>{
-  if(lastStatus==="running"){                  // «Остановить» — окно сразу готово к новому копанию
+  if(lastStatus==="running"){                  // "Stop" — the window is ready for a new dig at once
     $("#go").disabled=true; $("#go").textContent=t("stopping");
     try{ await api("/api/stop",{}); }finally{ poll(); }
     return;
   }
   const r = await api("/api/dig", params());
   if(r.error){toast(r.error);return}
-  logSince = 0; $("#log").textContent = "";   // старые ящики остаются на экране
+  logSince = 0; $("#log").textContent = "";   // old crates stay on screen
   startPolling();
 };
 function startPolling(){ clearInterval(polling); polling = setInterval(poll, 800); poll(); }
@@ -567,10 +574,10 @@ async function poll(){
   if(s.found_cookies) $("#cookies_browser").value = s.found_cookies;
   if(!running && !s.busy){ clearInterval(polling); polling=null; loadHistory(); if(s.status==="error" || s.note) $("#logBox").open = true;
     if(s.dig) renderDig(s.dig, s.tracks, false); }
-  else if(!running && !polling) startPolling();   // после «Стоп» дочитываем последние строки журнала
+  else if(!running && !polling) startPolling();   // after "Stop", read the last log lines
 }
 
-/* ------------ свои файлы */
+/* ------------ your own files */
 async function uploadAndCut(files){
   if(lastStatus==="running"){toast(t("waitDig"));return}
   files=[...files].filter(f=>/\.(mp3|wav|flac|aiff?|m4a|ogg|opus|webm|aac)$/i.test(f.name));
@@ -592,8 +599,8 @@ drop.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();$("#pick"
 $("#pick").onchange=e=>{uploadAndCut(e.target.files);e.target.value=""};
 document.addEventListener("dragover", e=>{
   e.preventDefault();
-  if(dragLoop){ e.dataTransfer.dropEffect = "none"; return; }   // луп тащат наружу, в папку
-  if(dragTrack){                                   // пластинку из списка принимает вся левая колонка
+  if(dragLoop){ e.dataTransfer.dropEffect = "none"; return; }   // a loop is being dragged out into a folder
+  if(dragTrack){                                   // the whole left column accepts a record from the list
     const inside = counter.contains(e.target);
     counter.classList.toggle("take", inside);
     e.dataTransfer.dropEffect = inside ? "copy" : "none";
@@ -607,7 +614,7 @@ document.addEventListener("drop", e=>{
   if(e.dataTransfer?.files?.length) uploadAndCut(e.dataTransfer.files);
 });
 
-/* ------------ повторный прогон пластинки с текущими настройками */
+/* ------------ re-running a record with the current settings */
 let dragTrack = null, dragLoop = false;
 const counter = $(".counter");
 function settingsLabel(){
@@ -638,15 +645,15 @@ async function rerun(tr){
   startPolling();
 }
 
-/* ------------ экран: все ящики этой сессии подряд */
+/* ------------ the screen: all crates of this session one after another */
 const ICON_PLAY = '<svg viewBox="0 0 16 16"><path d="M4 2l10 6-10 6z" fill="currentColor"/></svg>';
 const ICON_STOP = '<svg viewBox="0 0 16 16"><rect x="3" y="3" width="10" height="10" fill="currentColor"/></svg>';
 const ICON_TRASH = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2h4l.5 1H14v1.5H2V3h3.5zM3.5 5.5h9l-.7 8.1a1 1 0 0 1-1 .9H5.2a1 1 0 0 1-1-.9z" fill="currentColor"/></svg>';
 const ICON_SAVE = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 2.5h8.6l2.4 2.4v8.6h-11z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M5 2.5v3.2h5V2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="5" y="9" width="6" height="4.5" rx=".5" fill="currentColor"/></svg>';
-const rendered = {};          // uid -> луп
-const hidden = new Set();     // uid убранных с экрана
+const rendered = {};          // uid -> loop
+const hidden = new Set();     // uids of loops removed from the screen
 const uid = l => l.dig + "/" + l.name;
-const FAV = "★favorites";     // ящик «Избранное»: собирается из всех ящиков
+const FAV = "★favorites";     // the "Favorites" crate: collected from all crates
 function hue(cam){ const n=parseInt(cam); return `hsl(${(n-1)*30} 62% ${cam.endsWith("A")?38:46}%)`; }
 function compatible(a,b){
   const na=parseInt(a), nb=parseInt(b), la=a.slice(-1), lb=b.slice(-1);
@@ -677,7 +684,7 @@ function digSection(dig){
   $("#records").append(sec);
   return sec;
 }
-function fillDigHead(sec){             // тексты шапки ящика (и при смене языка)
+function fillDigHead(sec){             // texts of a crate header (also on language change)
   const lab = digLabel(sec.dataset.dig, sec._rerunTitle);
   sec.querySelector("h3").textContent = lab.title;
   sec.querySelector(".when").textContent = lab.when;
@@ -689,17 +696,17 @@ function renderDig(dig, tracks, running){
   body.querySelector(".pending")?.remove();
   const have = new Set([...body.querySelectorAll(".record")].map(e=>e.dataset.id));
   for(const tr of tracks){
-    const tdig = tr.dig || dig, rid = (tr.dig ? tr.dig+"|" : "") + tr.id;   // в Избранном пластинки из разных ящиков
+    const tdig = tr.dig || dig, rid = (tr.dig ? tr.dig+"|" : "") + tr.id;   // in Favorites, records come from different crates
     const shown = tr.loops.map(l=>Object.assign(l,{dig:tdig})).filter(l=>!hidden.has(uid(l)));
     if(have.has(rid)){ shown.forEach(l=>updateLoopFlags(l)); continue; }
-    const loops = shown.filter(l=>!document.querySelector(`.loop[data-uid="${CSS.escape(uid(l))}"]`));  // уже есть на экране
+    const loops = shown.filter(l=>!document.querySelector(`.loop[data-uid="${CSS.escape(uid(l))}"]`));  // already on screen
     if(!loops.length) continue;
     const rec = document.createElement("section"); rec.className="record"; rec.dataset.id=rid; rec._t = tr;
     rec.innerHTML = `<div class="sleeve" style="${tr.thumb?`background-image:url('${esc(tr.thumb)}')`:""}"></div>
       <div><h4 class="rtitle">${esc(tr.title)}</h4><p class="rartist"></p><div class="loops"></div></div>`;
     const lbox = rec.querySelector(".loops");
     for(const l of loops){ rendered[uid(l)] = l; lbox.append(loopRow(l)); }
-    if(tr.src || tr.url)                       // есть исходник или ссылка — можно прогнать заново
+    if(tr.src || tr.url)                       // has a source or a link — can be re-run
       for(const h of [rec.querySelector(".sleeve"), rec.querySelector(".rtitle")]){
         h.draggable = true;
         h.ondragstart = e=>startTrackDrag(e, tdig, tr, rec);
@@ -714,12 +721,12 @@ function renderDig(dig, tracks, running){
   if(!running && !body.querySelector(".record")) sec.remove();
   updateCount();
 }
-function fillRecord(rec){              // подпись пластинки на текущем языке
+function fillRecord(rec){              // record caption in the current language
   const tr = rec._t;
   rec.querySelector(".rartist").innerHTML = `${esc(tr.artist)}${tr.year?`, ${tr.year}`:""}${tr.views!=null?`, ${esc(t("plays",{v:fmtViews(tr.views)}))}`:""}${tr.url?` — <a href="${esc(tr.url)}" target="_blank" rel="noopener">${esc(t("listen"))}</a>`:""}${tr.dig?`<br><span class="fromdig">${esc(t("fromDig",{t:digLabel(tr.dig).title, w:digLabel(tr.dig).when}))}</span>`:""}`;
   for(const h of [rec.querySelector(".sleeve"), rec.querySelector(".rtitle")]) if(h.draggable) h.title = t("dragTitle");
 }
-function localizeScreen(){             // смена языка: тексты на экране меняются на месте, игра не прерывается
+function localizeScreen(){             // language change: texts change in place, playback is not interrupted
   document.querySelectorAll("#records .digsec").forEach(fillDigHead);
   document.querySelectorAll("#records .record").forEach(fillRecord);
   document.querySelectorAll("#records .loop").forEach(el=>{ const l = rendered[el.dataset.uid]; if(l) fillLoop(el, l); });
@@ -730,8 +737,16 @@ function updateLoopFlags(l, el){
   const b = el.querySelector(".fav");
   b.classList.toggle("on", !!l.fav); b.setAttribute("aria-pressed", !!l.fav);
   b.title = l.fav ? t("favOnTitle") : t("favOffTitle");
+  const w = el.querySelector(".wrong");
+  w.classList.toggle("on", !!l.wrong); w.setAttribute("aria-pressed", !!l.wrong);
+  w.title = l.wrong ? t("wrongOnTitle") : t("wrongTitle");
 }
-function fillLoop(el, l){              // все подписи лупа на текущем языке
+function dbgTitle(l){                  // Debugging mode: what the analyzer knew about the loop (hover the caption)
+  const d = l.dbg || {};
+  const parts = [`${t("dbgGrade")} ${l.grade ?? "—"}`, `${t("dbgSeam")} ${l.seam || "—"}`, `${t("dbgPos")} ${l.src_start}–${l.src_end} s`];
+  return parts.join(" · ") + (Object.keys(d).length ? "\n" + Object.entries(d).map(([k, v])=>`${k}=${v}`).join("  ") : "");
+}
+function fillLoop(el, l){              // all captions of a loop in the current language
   const sg = v => (v>0?"+":"") + v;
   const st = l.engine==="pitch" || l.engine==="varispeed"
     ? t("pitch", {v: sg(l.pitch_st ? l.pitch_st : +(12*Math.log2(1+l.stretch_pct/100)).toFixed(2))})
@@ -744,9 +759,12 @@ function fillLoop(el, l){              // все подписи лупа на т
   el.querySelector(".copy").title = t("copyTitle");
   el.querySelector(".meta").innerHTML = esc(kindTxt + t("meta",{bars:l.bars, bw, steps:l.steps, sw:pl(l.steps,"steps"), cam:l.camelot}))
     + "<br>" + esc((l.free ? t("free",{bars:l.bars, bw, bpm:l.bpm}) : t("was",{bpm:l.real_bpm, st}))
-    + (Math.abs(l.tuning_cents||0)>=25 ? ", " + t("tuning",{c:(l.tuning_cents>0?"+":"")+Math.round(l.tuning_cents)}) : ""));
+    + (Math.abs(l.tuning_cents||0)>=25 ? ", " + t("tuning",{c:(l.tuning_cents>0?"+":"")+Math.round(l.tuning_cents)}) : ""))
+    + (l.purity != null ? `<span class="dbgonly">, <span class="purity">${esc(t("purity",{p:Math.round(l.purity*100)}))}</span></span>` : "");
+  el.querySelector(".meta").title = DEBUG ? dbgTitle(l) : "";
   el.querySelector(".fav").setAttribute("aria-label", t("favAria"));
   const sv = el.querySelector(".save"); sv.title = t("saveTitle"); sv.setAttribute("aria-label", t("saveAria"));
+  el.querySelector(".wrong").setAttribute("aria-label", t("wrongAria"));
   const tr = el.querySelector(".trash"); tr.title = t("trashTitle"); tr.setAttribute("aria-label", t("trashAria"));
   updateLoopFlags(l, el);
 }
@@ -758,7 +776,7 @@ function loopRow(l){
       <div class="small"><button class="copy">${esc(l.name)}</button></div>
       <div class="meta"></div></div>
     <canvas class="wave"></canvas>
-    <div class="acts"><button class="icon fav">★</button><button class="icon save">${ICON_SAVE}</button><button class="icon trash">${ICON_TRASH}</button></div>`;
+    <div class="acts"><button class="icon wrong dbgonly">👎</button><button class="icon fav">★</button><button class="icon save">${ICON_SAVE}</button><button class="icon trash">${ICON_TRASH}</button></div>`;
   el.querySelector(".play").onclick = ()=>toggleLoop(l, el);
   el.querySelector(".wave").onclick = ()=>toggleLoop(l, el);
   el.querySelector(".copy").onclick = ()=>{navigator.clipboard?.writeText(l.name); toast(t("copied",{name:l.name}))};
@@ -769,7 +787,13 @@ function loopRow(l){
     toast(r.fav ? t("favAdded") : t("favRemoved"));
   };
   el.querySelector(".save").onclick = ()=>saveLoop(l);
-  el.draggable = true;                    // файл лупа можно утащить в папку проводника / Finder
+  el.querySelector(".wrong").onclick = async ()=>{      // Debugging mode: mark as a wrong match (or unmark)
+    const r = await api("/api/wrong",{dig:l.dig, name:l.name, on:!l.wrong});
+    if(r.error){ toast(r.error); return; }
+    l.wrong = r.wrong; updateLoopFlags(l);
+    toast(r.wrong ? t("wrongAdded",{d:r.folder}) : t("wrongRemoved"));
+  };
+  el.draggable = true;                    // the loop file can be dragged into an Explorer / Finder folder
   el.ondragstart = e=>{
     if(e.target !== el) return;
     dragLoop = true; el.classList.add("dragout");
@@ -783,8 +807,8 @@ function loopRow(l){
   requestAnimationFrame(()=>drawWave(el.querySelector(".wave"), l.peaks, -1));
   return el;
 }
-/* дискета: сохранить WAV лупа, когда перетаскивание в папку не работает.
-   Chrome/Edge спрашивают, куда сохранить (и помнят последнюю папку), остальные браузеры кладут в «Загрузки». */
+/* floppy disk: save the loop's WAV when dragging into a folder doesn't work.
+   Chrome/Edge ask where to save it (and remember the last folder), other browsers use Downloads. */
 async function saveLoop(l){
   const name = l.name + ".wav", url = fileUrl(l);
   if(window.showSaveFilePicker){
@@ -792,7 +816,7 @@ async function saveLoop(l){
     try{
       h = await window.showSaveFilePicker({suggestedName:name, id:"cratedigger-loops", startIn:"music",
         types:[{description:"WAV", accept:{"audio/wav":[".wav"]}}]});
-    }catch(e){ if(e.name==="AbortError") return; }      // окно закрыли — ничего не делаем
+    }catch(e){ if(e.name==="AbortError") return; }      // the dialog was closed — do nothing
     if(h){
       try{
         const r = await fetch(url); if(!r.ok) throw new Error(r.status);
@@ -854,7 +878,7 @@ function drawWave(cv, peaks, pos){
     g.fillStyle = (pos>=0 && i/n<=pos) ? "#23272E" : css;
     g.fillRect(i*bw, h/2-v, Math.max(1,bw-0.6), v*2);
   }
-  g.fillStyle="rgba(35,39,46,.25)";       // сетка долей
+  g.fillStyle="rgba(35,39,46,.25)";       // beat grid
   const loop = rendered[cv.closest(".loop").dataset.uid], beats = loop ? loop.beats : 8;
   for(let b=1;b<beats;b++){ const x=Math.round(b/beats*w); g.fillRect(x,b%4?h-5:0,1,b%4?5:h); }
 }
@@ -868,7 +892,7 @@ function renderHistory(){
 }
 async function showFavorites(){
   const old = document.querySelector(`.digsec[data-dig="${CSS.escape(FAV)}"]`);
-  if(old){ old.querySelectorAll(".loop").forEach(e=>stopLoop(e.dataset.uid)); old.remove(); }  // обновить
+  if(old){ old.querySelectorAll(".loop").forEach(e=>stopLoop(e.dataset.uid)); old.remove(); }  // refresh
   const m = await api("/api/favorites");
   if(!m.tracks.length){ toast(t("favEmpty")); updateCount(); return; }
   await api("/api/session",{action:"add",dig:FAV});
@@ -894,9 +918,17 @@ $("#clearScreen").onclick = ()=>{
   toast(t("cleared"));
 };
 $("#openDir").onclick = ()=>api("/api/open",{});
+let DEBUG = false;
+function setDebug(on, save){           // "Debugging": show purity and the wrong-match button on every loop
+  DEBUG = !!on; $("#debug").checked = DEBUG;
+  document.body.classList.toggle("debug", DEBUG);
+  document.querySelectorAll("#records .loop").forEach(el=>{ const l = rendered[el.dataset.uid]; if(l) fillLoop(el, l); });
+  if(save) api("/api/settings", {debug:DEBUG});
+}
+$("#debug").onchange = e=>setDebug(e.target.checked, true);
 $("#saveDir").onclick = async ()=>{ const r=await api("/api/settings",{out_dir:$("#out_dir").value}); toast(r.error||t("folder",{d:r.out_dir})); loadHistory(); };
 
-/* ------------ ZIP для Model:Samples: <BPM>/<тональность>/<луп>.wav */
+/* ------------ ZIP for the Model:Samples: <BPM>/<key>/<loop>.wav */
 $("#zipBtn").onclick = async ()=>{
   const items = visibleLoops().map(l=>({dig:l.dig, name:l.name}));
   if(!items.length) return;
@@ -914,11 +946,11 @@ $("#zipBtn").onclick = async ()=>{
   finally{ updateCount(); }
 };
 
-/* ------------ плеер и джем */
+/* ------------ player and jam: loops start on the next bar of the first playing loop */
 let ctx=null, gain=null; const buffers={}, voices={};
 function audio(){ if(!ctx){ ctx=new (window.AudioContext||window.webkitAudioContext)(); gain=ctx.createGain(); gain.gain.value=+$("#vol").value; gain.connect(ctx.destination);} return ctx; }
 $("#vol").oninput = e=>{ if(gain) gain.gain.value=+e.target.value; };
-function fileUrl(l){             // тот же файл, что играет на экране и ложится в ZIP
+function fileUrl(l){             // the same file that plays on screen and goes into the ZIP
   const f = l.files.stereo || l.files.mono;
   return "/files/"+encodeURIComponent(l.dig)+"/"+f.split("/").map(encodeURIComponent).join("/");
 }
@@ -938,7 +970,7 @@ async function toggleLoop(l, el){
   let rate = 1, t0 = c.currentTime + 0.03;
   if(m){
     if($("#syncRate").checked) rate = m.bpm / l.bpm;
-    const bar = 4*60/m.bpm;                                    // длина такта мастера
+    const bar = 4*60/m.bpm;                                    // bar length of the master loop
     t0 = m.t0 + Math.ceil((c.currentTime + 0.03 - m.t0)/bar)*bar;
   }
   src.playbackRate.value = rate; src.connect(gain); src.start(t0);
@@ -982,23 +1014,24 @@ function renderDiag(){
   $("#diag").innerHTML = (w.length? w.join("<br>")+"<br>" : "") + `yt-dlp ${esc(h.yt_dlp||"—")}, ${esc(t("jsEngine"))}: ${esc(h.js||"—")}`;
 }
 
-/* ------------ старт */
+/* ------------ start-up */
 applyLang();
 (async ()=>{
   const s = await api("/api/settings");
-  if(LANGS.includes(s.lang)){                       // язык, выбранный флажком (общий для всех окон)
+  if(LANGS.includes(s.lang)){                       // language chosen with a flag (shared by all windows)
     if(s.lang!==LANG){ LANG = s.lang; try{ localStorage.setItem("cd_lang", LANG); }catch(e){} }
-  } else {                                          // первый запуск: язык браузера
+  } else {                                          // first run: the browser's language
     let first = LANG;
     try{ if(!localStorage.getItem("cd_lang")){ const nl = (navigator.language||"ru").slice(0,2).toLowerCase(); first = LANGS.includes(nl) ? nl : "en"; } }catch(e){}
     LANG = first; api("/api/settings", {lang:LANG});
   }
   fill(Object.assign({}, s.defaults, s.last||{}));
   $("#out_dir").value = s.out_dir;
+  setDebug(s.debug, false);
   applyLang();
   loadHistory();
   healthInfo = await api("/api/health"); renderDiag();
-  const ses = await api("/api/session");          // что было на экране до перезагрузки окна
+  const ses = await api("/api/session");          // what was on screen before the window was reloaded
   ses.hidden.forEach(h=>hidden.add(h));
   for(const d of ses.digs) renderDig(d.name, d.tracks, d.running);
   updateCount();

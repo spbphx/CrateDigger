@@ -1,5 +1,9 @@
 """
-Главный процесс «копания»: поиск -> проверка эпохи -> скачивание -> анализ -> лупы -> файлы.
+The main "digging" process: search -> era check -> download -> analysis -> loops -> files.
+
+cut_track() is a pure function (it runs in analysis processes); Session writes a crate to disk;
+Pipeline connects the network thread, the analysis processes and the writer thread;
+run_dig / run_local / run_rerun are the three jobs the interface can start.
 """
 from __future__ import annotations
 
@@ -30,13 +34,13 @@ MS_DIR = "ModelSamples_mono16"
 CHOPS_DIR = "Chops"
 SRC_DIR = "Sources_mp3"
 KEEP_AS_IS = (".mp3", ".wav", ".flac", ".aif", ".aiff")
-PREFER_RU = {"any": "любые лупы", "breaks": "брейки", "melodic": "мелодия"}
-ONLY_RU = {"drums": "одни барабаны", "bass": "один бас", "vocal": "голос без бита", "pads": "одни пэды"}
+PREFER_LABEL = {"any": "any loops", "breaks": "breaks", "melodic": "melody"}
+ONLY_PHRASE = {"drums": "drums alone", "bass": "bass alone", "vocal": "voice without a beat", "pads": "pads alone"}
 
 
-def what_ru(p: dict) -> str:
-    """Что ищем — для журнала."""
-    return T(" или ").join(T(iso.NAME_RU[k]) for k in p["only"]) if p["only"] else T(PREFER_RU[p["prefer"]])
+def what_label(p: dict) -> str:
+    """What we are looking for — for the log."""
+    return T(" or ").join(T(iso.KIND_LABEL[k]) for k in p["only"]) if p["only"] else T(PREFER_LABEL[p["prefer"]])
 
 _TR = dict(zip("абвгдеёжзийклмнопрстуфхцчшщъыьэюя",
                ["a", "b", "v", "g", "d", "e", "e", "zh", "z", "i", "y", "k", "l", "m", "n", "o", "p",
@@ -44,6 +48,7 @@ _TR = dict(zip("абвгдеёжзийклмнопрстуфхцчшщъыьэю
 
 
 def translit(s: str) -> str:
+    """Russian letters -> Latin (for file names)."""
     out = []
     for ch in s:
         low = ch.lower()
@@ -56,6 +61,7 @@ def translit(s: str) -> str:
 
 
 def clean_title(title: str, maxlen: int = 20) -> str:
+    """A short CamelCase title for file names: no brackets, remaster notes or featuring; ASCII only."""
     t = title or ""
     t = re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", "", t)                       # (Remastered 2015), [Live]
     t = re.sub(r"\s+-\s+.*\b(remaster\w*|version|mix|mono|stereo|edit|live|single)\b.*$", "", t, flags=re.I)
@@ -69,6 +75,7 @@ def clean_title(title: str, maxlen: int = 20) -> str:
 
 
 def slug(s: str, n=40) -> str:
+    """A folder-name-safe slug of the tags ("random" if empty)."""
     s = translit(s or "")
     s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
     s = re.sub(r"[^A-Za-z0-9]+", "-", s).strip("-").lower()
@@ -76,11 +83,13 @@ def slug(s: str, n=40) -> str:
 
 
 def safe_name(s: str) -> str:
+    """Remove characters that are not allowed in file names."""
     return re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", s).strip(" .")[:120] or "track"
 
 
-# --------------------------------------------------------------------------- состояние
+# --------------------------------------------------------------------------- job state
 class JobState:
+    """Everything the interface polls about the running job: status, progress, log, tracks."""
     def __init__(self):
         self.lock = threading.Lock()
         self.reset()
@@ -94,13 +103,13 @@ class JobState:
         self.dig_name = ""
         self.stop = False
         self.found_cookies = ""
-        self.note = ""          # итог, который надо показать вместо «Готово»
-        self.stop_hooks = []    # что сделать сразу по «Стоп» (прибить процессы анализа)
-        self.busy = False       # поток задачи ещё дорабатывает (после «Стоп» — уже не мешает новой)
+        self.note = ""          # the summary to show instead of "Done"
+        self.stop_hooks = []    # what to do at once on "Stop" (kill the analysis processes)
+        self.busy = False       # the job thread is still finishing (after "Stop" it no longer blocks a new job)
 
     def request_stop(self):
-        """«Остановить»: окно сразу свободно для нового копания. Сеть бросает запрос, процессы
-        анализа прибиваются, а поток задачи дописывает итог в этот (уже старый) JobState."""
+        """"Stop": the window is free for a new dig right away. The network drops its request, the analysis
+        processes are killed, and the job thread writes its summary into this (now old) JobState."""
         self.stop = True
         with self.lock:
             if self.status == "running":
@@ -113,12 +122,14 @@ class JobState:
                 traceback.print_exc()
 
     def log(self, msg: str):
+        """Add a timestamped line to the job log (the interface fetches new lines)."""
         with self.lock:
             self.log_lines.append(time.strftime("%H:%M:%S ") + msg)
             if len(self.log_lines) > 600:
                 self.log_lines = self.log_lines[-500:]
 
     def snapshot(self, since=0):
+        """A copy of the state for /api/state; `since` — how many log lines the window already has."""
         with self.lock:
             return dict(status=self.status, progress=round(self.progress, 3), current=self.current,
                         log=self.log_lines[since:], log_total=len(self.log_lines),
@@ -126,8 +137,9 @@ class JobState:
                         note=self.note, busy=self.busy)
 
 
-# --------------------------------------------------------------------------- история
+# --------------------------------------------------------------------------- history
 class History:
+    """Video ids already used, so the same record is not dug twice."""
     def __init__(self, root: Path):
         self.path = root / ".crate_history.json"
         try:
@@ -144,10 +156,10 @@ class History:
             pass
 
 
-# --------------------------------------------------------------------------- копаем
+# --------------------------------------------------------------------------- digging
 DEFAULTS = dict(tags="", n_tracks=5, n_loops=3, bars=2, prefer="any", mode="stretch",
                 bpm_min=60, bpm_max=120, y0=1960, y1=1999, strict_year=False,
-                year_filter=True, bpm_filter=True,
+                year_filter=False, bpm_filter=False,
                 save_mp3=True, formats="stereo", chops=False, normalize=True, title_len=20,
                 cookies_browser="", rare=False, sort_ms=False, only=[])
 
@@ -160,6 +172,7 @@ def _int(v, lo, hi, d):
 
 
 def normalize_params(p: dict) -> dict:
+    """Settings from the interface -> a complete, validated dict (unknown or broken values fall back to defaults)."""
     q = dict(DEFAULTS)
     q.update({k: v for k, v in (p or {}).items() if k in DEFAULTS})
     q["n_tracks"] = _int(q["n_tracks"], 1, 20, 5)
@@ -171,27 +184,25 @@ def normalize_params(p: dict) -> dict:
     q["y0"] = _int(q["y0"], 1940, 2025, 1960)
     q["y1"] = _int(q["y1"], q["y0"], 2025, 1999)
     q["title_len"] = _int(q["title_len"], 6, 60, 20)
-    # «Только …» — можно несколько сразу (работают как ИЛИ); первый ряд тогда не важен
+    # "Only ..." — several at once are allowed (they work as OR); the first row is ignored then
     only = q["only"] or []
     if isinstance(only, str):
         only = only.split(",")
-    if q["prefer"] == "drums":          # настройки версии 1.0
+    if q["prefer"] == "drums":          # settings of version 1.0
         only, q["prefer"] = list(only) + ["drums"], "any"
     q["only"] = [k for k in iso.KINDS if k in only]
-    q["prefer"] = q["prefer"] if q["prefer"] in PREFER_RU else "any"
-    if q["only"] and q["bars"] == 4:    # «Только …» — для лупов в 1–2 такта
-        q["prefer"] = "breaks" if "drums" in q["only"] else "any"
-        q["only"] = []
+    q["prefer"] = q["prefer"] if q["prefer"] in PREFER_LABEL else "any"
     q["mode"] = q["mode"] if q["mode"] in ("stretch", "vinyl") else "stretch"
     q["formats"] = q["formats"] if q["formats"] in ("both", "stereo", "mono") else "stereo"
     for k in ("strict_year", "save_mp3", "chops", "normalize", "rare", "sort_ms", "year_filter", "bpm_filter"):
         q[k] = bool(q[k]) and q[k] not in ("0", "false", "False")
-    if not q["bpm_filter"]:                            # без фильтра — весь диапазон 60–120
+    if not q["bpm_filter"]:                            # no filter — the full 60-120 range
         q["bpm_min"], q["bpm_max"] = 60, 120
     return q
 
 
 def unique_name(base: str, taken: set) -> str:
+    """A file name not used yet in this crate (adds _2, _3...)."""
     if base not in taken:
         return base
     for suf in "bcdefghijklmnopqrstuvwxyz":
@@ -201,6 +212,7 @@ def unique_name(base: str, taken: set) -> str:
 
 
 def _new_dig_dir(root: Path, label: str) -> tuple[Path, str]:
+    """Create the crate folder <date>_<tags>[_N]. -> (path, timestamp)"""
     root.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
     dig_dir = root / f"{stamp}_{slug(label)}"
@@ -213,25 +225,57 @@ def _new_dig_dir(root: Path, label: str) -> tuple[Path, str]:
 
 
 def _loop_opts(p):
+    """Rendering options shared by all loops of a record."""
     return dict(mode=p["mode"], bpm_min=p["bpm_min"], bpm_max=p["bpm_max"],
                 fixed_bpm=None, max_stretch=0.05, normalize=p["normalize"])
 
 
 def _max_stretch(p: dict, kind: str | None) -> float:
-    """Насколько можно подгонять темп. Вокалу в «стретче» — сколько нужно (высота не меняется),
-    в «питчинге» — до ±15 %; остальным — до ±5 %."""
+    """How much the tempo may be fitted. Vocals in "stretching" — as much as needed (pitch doesn't
+    change), in "pitching" — up to +-15 %; everything else — up to +-5 %."""
     if kind == "vocal":
         return 0.15 if p["mode"] == "vinyl" else 1.0
     return 0.05
 
 
+VOCAL_EDGE_DB = 6.0      # vocal loops whose start and end differ in loudness by more go to the end of the queue
+
+
+def _queue(an, kind: str, cands: list[dict], rng) -> list[dict]:
+    """Candidates of one "Only" type in the order they should be used:
+    "clean" before "with extras", then by rank (with a little randomness, as in real digging).
+    Spans with a predictable seam problem go last and are used only if nothing else is left:
+      * vocals — loudness at the start and at the end differ a lot (the loop jumps at the restart);
+      * off-grid pads — something new comes in during the last half second (it would be cut off).
+    Also attaches purity (0..1) and the detector metrics for Debugging mode."""
+    for c in cands:
+        c["_r"] = c["rank"] + float(rng.normal(0, 0.012))
+        late = False
+        if kind == "drums":
+            c["purity"] = an.drum_purity(c["t0"], c["t1"])
+            c["dbg"] = {k: round(float(v), 3) for k, v in an.drum_metrics(c["t0"], c["t1"]).items()}
+        else:
+            m = an.iso_metrics(c["t0"], c["t1"])
+            c["purity"] = float(np.clip(iso.score(m, kind), 0, 1))
+            c["dbg"] = {k: round(float(v), 2) for k, v in m.items()}
+            if kind == "vocal":
+                jump = an.edge_jump(c["t0"], c["t1"])
+                c["dbg"]["edge_jump"] = round(jump, 1)
+                late = abs(jump) > VOCAL_EDGE_DB
+            elif kind == "pads" and c.get("free"):
+                late = an.late_entry(c["t0"], c["t1"])
+                c["dbg"]["late_entry"] = bool(late)
+        c["late"] = late
+    return sorted(cands, key=lambda c: (c["late"], -c.get("grade", 2), -c["_r"]))
+
+
 def cut_track(path, p: dict, hint_bpm: int | None = None, lenient: bool = False, tmp_dir=None) -> dict:
-    """Анализ одного трека и нарезка лупов БЕЗ записи результата на диск — чистая функция
-    (её запускают процессы конвейера). hint_bpm — самый частый BPM в ящике (по нему режем
-    пэды из треков без бита). lenient — брать сколько нашлось. tmp_dir — куда ffmpeg временно
-    кладёт раскодированный звук (тогда он не занимает память процесса).
-    -> dict(loops=[…с аудио…], logs=[…], reason=None | «почему трек не подошёл», tempo, tuning)"""
-    set_lang(p.get("lang"))              # процесс анализа пишет причины на языке интерфейса
+    """Analysis of one track and cutting of loops WITHOUT writing anything to disk — a pure function
+    (the pipeline processes run it). hint_bpm — the most common BPM in the crate (beatless pads are cut
+    to it). lenient — take as many loops as were found. tmp_dir — where ffmpeg temporarily puts the
+    decoded audio (then it doesn't take the process's memory).
+    -> dict(loops=[...with audio...], logs=[...], reason=None | "why the track didn't fit", tempo, tuning)"""
+    set_lang(p.get("lang"))              # the analysis process writes its reasons in the interface language
     x = dsp.load_audio_i16(path, tmp_dir=tmp_dir)
     try:
         return _cut(x, p, hint_bpm, lenient)
@@ -240,22 +284,24 @@ def cut_track(path, p: dict, hint_bpm: int | None = None, lenient: bool = False,
 
 
 def _cut(x, p: dict, hint_bpm, lenient) -> dict:
+    """The body of cut_track(): analysis, candidate selection, rendering. x — int16 audio."""
     t_start = time.time()
     an = dsp.TrackAnalysis(x, want_iso=any(k in iso.ISO_KINDS for k in p["only"]))
     res = dict(loops=[], reason=None, tempo=round(an.tempo, 2), tuning=round(an.tuning, 1),
-               logs=[T("   темп ≈{tempo:.1f} BPM, строй {tuning:+.0f} центов, анализ {sec:.1f} с",
+               logs=[T("   tempo ≈{tempo:.1f} BPM, tuning {tuning:+.0f} cents, analysis {sec:.1f} s",
                        tempo=an.tempo, tuning=an.tuning, sec=time.time() - t_start)])
     only, n = p["only"], p["n_loops"]
-    free_ok = any(k in ("pads", "vocal") for k in only)   # им сетка и точный темп не обязательны
+    free_ok = any(k in ("pads", "vocal") for k in only)   # a grid and an exact tempo aren't required for these
     why = an.rhythm_problem()
     if why and not free_ok:
-        res["reason"] = T("{why} — ровно не залупится", why=why)
+        res["reason"] = T("{why} — won't loop cleanly", why=why)
         return res
     track_fit = dsp.choose_target(an.tempo, p["bpm_min"], p["bpm_max"], None, 0.05)
     if track_fit is None and not free_ok:
-        res["reason"] = T("темп {tempo:.1f} не подходит под диапазон {a}–{b}", tempo=an.tempo, a=p["bpm_min"], b=p["bpm_max"])
+        res["reason"] = T("tempo {tempo:.1f} is outside the {a}–{b} range", tempo=an.tempo, a=p["bpm_min"], b=p["bpm_max"])
         return res
 
+    rng = np.random.default_rng()
     if only:
         free_bpm = None
         if free_ok:
@@ -265,25 +311,23 @@ def _cut(x, p: dict, hint_bpm, lenient) -> dict:
                 free_bpm = int(hint_bpm)
             else:
                 free_bpm = 5 * round((p["bpm_min"] + p["bpm_max"]) / 10)
-        cands = [c for k in only for c in an.iso_candidates(k, p["bars"], free_bpm)]
-        picks = dsp.select_loops(cands, n + 4, sims=(0.93, 0.975, 0.985))
+        queues = {k: _queue(an, k, an.iso_candidates(k, p["bars"], free_bpm), rng) for k in only}
+        dry = dsp.interleave_loops(queues, n, accept=lambda c: c)      # first guess of the picks (no rendering)
     else:
         free_bpm = None
-        picks = an.pick_loops(n + 4, p["bars"], p["prefer"])
+        dry = an.pick_loops(n + 4, p["bars"], p["prefer"], rng)
 
-    # один целевой темп на всю пластинку — лупы одного трека сойдутся друг с другом
+    # one target tempo for the whole record — loops of one track will fit each other
     opts, fixed = _loop_opts(p), None
-    grid = [c for c in picks[:n] if not c.get("free")]
+    grid = [c for c in dry[:n] if not c.get("free")]
     if grid:
         bt = an.beat_times
         reals = [60.0 * (c["e"] - c["s"]) / (bt[c["e"]] - bt[c["s"]]) for c in grid]
         fixed = dsp.choose_target(float(np.median(reals)), p["bpm_min"], p["bpm_max"], None, 0.05)
     free_target = fixed[0] if fixed else free_bpm
 
-    rendered = []
-    for c in picks:
-        if len(rendered) >= n:
-            break
+    def render(c):
+        """Render one candidate -> loop dict with audio (or None if it can't be fitted / has a bad seam)."""
         kind = c.get("kind")
         if c.get("free"):
             r = dsp.render_free(an, c["t0"], p["bars"], free_target, dict(opts, kind=kind))
@@ -293,30 +337,43 @@ def _cut(x, p: dict, hint_bpm, lenient) -> dict:
             if fixed:
                 o.update(fixed_bpm=fixed[0], max_stretch=max(0.07, ms))
             r = dsp.render_loop(an, c["s"], c["e"], o)
-            if r is None and kind == "pads" and free_target:      # пэд не влез в темп — режем без растяжения
+            if r is None and kind == "pads" and free_target:      # the pad didn't fit the tempo — cut it without stretching
                 r = dsp.render_free(an, c["t0"], p["bars"], free_target, dict(opts, kind=kind))
         if r:
             r["score"] = round(float(c.get("rank", c.get("score", 0))), 3)
             if kind:
-                r.update(kind=kind, mixed=c.get("grade", 2) < 2)
-            rendered.append(r)
+                r.update(kind=kind, mixed=c.get("grade", 2) < 2, grade=int(c.get("grade", 2)),
+                         purity=round(float(c.get("purity", 0)), 2), dbg=c.get("dbg", {}))
+        return r
 
-    need = 1 if only else n               # изолированные куски редкие — хватит и одного
+    if only:          # several "Only" types take turns; inside a type — cleanest first
+        rendered = dsp.interleave_loops(queues, n, accept=render)
+    else:
+        rendered = []
+        for c in dry:
+            if len(rendered) >= n:
+                break
+            r = render(c)
+            if r:
+                rendered.append(r)
+
+    need = 1 if only else n               # isolated parts are rare — one loop is enough
     if len(rendered) < need and not lenient:
-        res["reason"] = (T("нет мест, где звучит {what} — беру другую пластинку",
-                           what=T(" или ").join(T(ONLY_RU[k]) for k in only))
-                         if only else T("нашёл только {k} хороших лупа(ов) из {n}", k=len(rendered), n=n))
+        res["reason"] = (T("no parts with {what} — taking another record",
+                           what=T(" or ").join(T(ONLY_PHRASE[k]) for k in only))
+                         if only else T("found only {k} good loop(s) of {n}", k=len(rendered), n=n))
         return res
     if not rendered:
-        res["reason"] = T("не нашёл ни одного ровного лупа")
+        res["reason"] = T("no clean loop found")
         return res
-    rendered.sort(key=lambda r: r["src_start"])
+    if not only:
+        rendered.sort(key=lambda r: r["src_start"])      # "Any/Breaks/Melody": in track order
     res["loops"] = rendered
     return res
 
 
 class Session:
-    """Один «ящик»: папка, метаданные, уникальные имена."""
+    """One "crate": a folder, metadata, unique names."""
 
     def __init__(self, root: Path, state: JobState, p: dict, label: str):
         self.root, self.state, self.p = root, state, p
@@ -328,25 +385,25 @@ class Session:
         with state.lock:
             state.dig_name = self.dig_dir.name
             state.tracks = []
-        self.log(T("📦 Новый ящик: {name}", name=self.dig_dir.name))
-        self.log(T("🎚 Подгонка темпа: питчинг (темп меняется вместе с высотой)") if p["mode"] == "vinyl"
-                 else T("🎚 Подгонка темпа: стретч (удары на месте, высота та же)"))
+        self.log(T("📦 New crate: {name}", name=self.dig_dir.name))
+        self.log(T("🎚 Tempo fit: pitching (tempo and pitch change together)") if p["mode"] == "vinyl"
+                 else T("🎚 Tempo fit: stretching (hits stay in place, same pitch)"))
 
     def common_bpm(self) -> int | None:
-        """Самый частый BPM среди лупов этого ящика."""
+        """The most common BPM among the loops of this crate."""
         with self.lock:
             c = Counter(l["bpm"] for t in self.meta["tracks"] for l in t["loops"])
         return c.most_common(1)[0][0] if c else None
 
     def save(self, path: Path, track: dict, res: dict):
-        """Запись лупов на диск и в dig.json (только в главном процессе — тут уникальные имена)."""
+        """Write loops to disk and to dig.json (only in the main process — unique names are decided here)."""
         p, log = self.p, self.log
         label = f"{track['artist']} — {track['title']}"
         short = clean_title(track["title"], p["title_len"])
         track.update(tempo=res["tempo"], tuning=res["tuning"], loops=[])
         dig_dir = self.dig_dir
         for i, r in enumerate(res["loops"], 1):
-            letter = iso.LETTER.get(r.get("kind"), "")          # Amin95BQuark1 — тип после тональности
+            letter = iso.LETTER.get(r.get("kind"), "")          # Amin95BQuark1 — the type letter goes after the key
             name = unique_name(f"{r['key']}{r['bpm']}{letter}{short}{i}", self.taken)
             self.taken.add(name)
             files = {}
@@ -385,12 +442,12 @@ class Session:
         log(f"✅ {label}: " + ", ".join(l["name"] for l in track["loops"]))
 
     def _keep_source(self, path: Path, track: dict, label: str):
-        """Исходник рядом с лупами — из него пластинку можно прогнать заново без YouTube."""
+        """The source track next to the loops — the record can be re-run from it without YouTube."""
         d = self.dig_dir / SRC_DIR
         d.mkdir(exist_ok=True)
         base = safe_name(label.replace(" — ", " - "))
         try:
-            if path.suffix.lower() in KEEP_AS_IS:          # mp3/wav/flac копируем без перекодирования
+            if path.suffix.lower() in KEEP_AS_IS:          # mp3/wav/flac are copied without re-encoding
                 dst = d / (base + path.suffix.lower())
                 shutil.copy2(path, dst)
             else:
@@ -398,24 +455,25 @@ class Session:
                 dsp.save_mp3(path, dst)
             track["src"] = f"{SRC_DIR}/{dst.name}"
         except Exception as e:
-            self.log(T("   (исходник не сохранился: {e})", e=str(e)[:120]))
+            self.log(T("   (source not kept: {e})", e=str(e)[:120]))
 
     def finish(self, n_records):
+        """Final save; an empty crate folder is removed. -> crate folder or None"""
         write_meta(self.dig_dir, self.meta)
         total = sum(len(t["loops"]) for t in self.meta["tracks"])
         if total == 0:
             shutil.rmtree(self.dig_dir, ignore_errors=True)
             with self.state.lock:
                 self.state.dig_name = ""
-        self.log(T("🏁 Готово: {n} {rw}, {total} {lw}", n=n_records, rw=P(n_records, "record"),
+        self.log(T("🏁 Done: {n} {rw}, {total} {lw}", n=n_records, rw=P(n_records, "record"),
                    total=total, lw=P(total, "loop")) + (f" → {self.dig_dir}" if total else ""))
         return self.dig_dir if total else None
 
 
 class Pipeline:
-    """Конвейер: треки анализируются в отдельных процессах (workers.Analyzer), а результаты
-    записывает только этот процесс — в одном потоке записи, по очереди (без гонок за имена
-    и dig.json). Сеть тем временем скачивает следующий трек."""
+    """The pipeline: tracks are analysed in separate processes (workers.Analyzer), and the results are
+    written only by this process — in one writer thread, one at a time (no races for names and
+    dig.json). Meanwhile the network downloads the next track."""
 
     def __init__(self, sess: "Session", state: JobState, total: int, lenient: bool = False, on_accept=None):
         self.sess, self.state, self.p = sess, state, sess.p
@@ -423,20 +481,20 @@ class Pipeline:
         self.log = state.log
         self.pool = workers.Analyzer(self.log, tasks=total, tmp=sess.root / ".tmp" / "analysis")
         if self.pool.parallel and self.pool.n > 1:
-            self.log(T("⚙ Анализ идёт в {n} процессах параллельно", n=self.pool.n))
+            self.log(T("⚙ Analysing in {n} parallel processes", n=self.pool.n))
         self.cv = threading.Condition()
-        self.pending: dict[int, str] = {}         # отдано в анализ, ещё не записано: номер -> название
+        self.pending: dict[int, str] = {}         # sent to analysis, not written yet: number -> title
         self.accepted = 0
-        self.net = ""                             # что сейчас делает сеть (для строки состояния)
+        self.net = ""                             # what the network is doing right now (for the status line)
         self._n = 0
         self.q: queue.Queue = queue.Queue()
         self.saver = threading.Thread(target=self._save_loop, daemon=True, name="saver")
         self.saver.start()
-        state.stop_hooks.append(self.pool.kill)  # «Стоп» — сразу, даже если сеть занята скачиванием
+        state.stop_hooks.append(self.pool.kill)  # "Stop" — at once, even if the network is busy downloading
 
     @property
     def slots(self) -> int:
-        """Сколько треков держать в анализе одновременно."""
+        """How many tracks to keep in analysis at the same time."""
         return self.pool.n if self.pool.parallel else 1
 
     def counts(self) -> tuple[int, int]:
@@ -444,18 +502,19 @@ class Pipeline:
             return self.accepted, len(self.pending)
 
     def submit(self, path, track: dict, cleanup: bool = True):
-        """Отдать скачанный трек в анализ. cleanup — удалить файл, когда он больше не нужен."""
+        """Hand a downloaded track to analysis. cleanup — delete the file when it is no longer needed."""
         label = f"{track['artist']} — {track['title']}"
         with self.cv:
             self._n += 1
             key = self._n
             self.pending[key] = label
         self.status()
-        p = dict(self.p, lang=i18n.LANG)              # язык сообщений — текущий язык интерфейса
+        p = dict(self.p, lang=i18n.LANG)              # language of messages — the current interface language
         fut = self.pool.submit(cut_track, str(path), p, self.sess.common_bpm(), self.lenient, self.pool.tmp)
         fut.add_done_callback(lambda f: self.q.put((key, f, Path(path), track, label, cleanup)))
 
     def _save_loop(self):
+        """Writer thread: takes finished analyses from the queue and saves them one at a time."""
         while True:
             item = self.q.get()
             if item is None:
@@ -464,7 +523,7 @@ class Pipeline:
             try:
                 self._handle(fut, path, track, label)
             except Exception as e:
-                self.log(T("✕ {label}: не сохранилось ({e})", label=label, e=str(e)[:200]))
+                self.log(T("✕ {label}: not saved ({e})", label=label, e=str(e)[:200]))
                 traceback.print_exc()
             finally:
                 if cleanup:
@@ -475,12 +534,13 @@ class Pipeline:
                 self.status()
 
     def _handle(self, fut, path: Path, track: dict, label: str):
+        """Log the result of one analysis and save its loops if the track fits."""
         if self.state.stop or fut.cancelled():
             return
         try:
             res = fut.result()
         except workers.BrokenProcessPool:
-            self.log(T("✕ {label}: процесс анализа завершился аварийно (возможно, не хватило памяти) — пропускаю", label=label))
+            self.log(T("✕ {label}: the analysis process crashed (maybe out of memory) — skipping", label=label))
             return
         except Exception as e:
             self.log(f"✕ {label}: {str(e)[:300]}")
@@ -492,7 +552,7 @@ class Pipeline:
             return
         with self.cv:
             if self.accepted >= self.total and not self.lenient:
-                return                            # уже набрали нужное (на всякий случай)
+                return                            # already have enough (just in case)
         self.sess.save(path, track, res)
         with self.cv:
             self.accepted += 1
@@ -505,6 +565,7 @@ class Pipeline:
             self.cv.wait(timeout)
 
     def status(self, net: str | None = None):
+        """Update the status line and the progress bar (net — what the network is doing)."""
         if net is not None:
             self.net = net
         with self.cv:
@@ -512,19 +573,19 @@ class Pipeline:
             acc, busy = self.accepted, len(self.pending)
         parts = [self.net] if self.net else []
         if names:
-            parts.append(T("анализ: {names}", names=", ".join(names)))
+            parts.append(T("analysing: {names}", names=", ".join(names)))
         with self.state.lock:
-            self.state.current = " · ".join(parts) or T("Работаю…")
+            self.state.current = " · ".join(parts) or T("Working…")
             self.state.progress = min(0.999, (acc + 0.5 * busy) / max(1, self.total))
 
     def finish(self):
-        """Дождаться начатых анализов (по «Стоп» — бросить их) и закрыть процессы."""
+        """Wait for the started analyses (on "Stop" — abandon them) and close the processes."""
         self.status(net="")
         deadline = None
         while True:
             if self.state.stop:
                 self.pool.kill()
-                deadline = deadline or time.time() + 5     # дать прибитым задачам отметиться
+                deadline = deadline or time.time() + 5     # let the killed tasks report back
             with self.cv:
                 if not self.pending or (deadline and time.time() > deadline):
                     break
@@ -538,14 +599,14 @@ class Pipeline:
 
 
 def run_dig(params: dict, root: Path, state: JobState):
-    """Копаем на YouTube Music: сеть — строго по очереди в этом потоке, анализ — в процессах."""
+    """Dig on YouTube Music: the network strictly one request at a time in this thread, analysis in processes."""
     p = normalize_params(params)
     sess = Session(root, state, p, p["tags"])
     log = state.log
-    log(T("🎛 Теги: {tags}; {years}; {bpm}; {n} пластинок по {k} лупа, {bars} такт(а)",
-          tags=p["tags"] or T("нет, случайные пластинки"),
-          years=T("годы {a}–{b}", a=p["y0"], b=p["y1"]) if p["year_filter"] else T("годы любые"),
-          bpm=f"BPM {p['bpm_min']}–{p['bpm_max']}" if p["bpm_filter"] else T("BPM любой"),
+    log(T("🎛 Tags: {tags}; {years}; {bpm}; {n} records × {k} loops, {bars} bar(s)",
+          tags=p["tags"] or T("none, random records"),
+          years=T("years {a}–{b}", a=p["y0"], b=p["y1"]) if p["year_filter"] else T("any years"),
+          bpm=f"BPM {p['bpm_min']}–{p['bpm_max']}" if p["bpm_filter"] else T("any BPM"),
           n=p["n_tracks"], k=p["n_loops"], bars=p["bars"]))
     hist = History(root)
     rng = random.Random()
@@ -553,35 +614,37 @@ def run_dig(params: dict, root: Path, state: JobState):
         fetcher = Fetcher(root / ".tmp", log, p["cookies_browser"], cookie_file=APP_DIR / "cookies.txt",
                           stop=lambda: state.stop)
     except ImportError:
-        raise RuntimeError(T("Не установлен yt-dlp. Запустите программу через start-файл — он всё поставит."))
+        raise RuntimeError(T("yt-dlp is not installed. Launch the program with the start file — it "
+                             "installs everything."))
 
     n = p["n_tracks"]
     pool: list[dict] = []
     tried: set[str] = set()
     attempts = queries = empty_streak = 0
     max_attempts, max_queries = n * 12, n * 10
-    if p["only"]:                         # изолированные куски редки — копаем глубже
+    if p["only"]:                         # isolated parts are rare — dig deeper
         max_attempts, max_queries = n * 25, n * 20
     if p["rare"]:
         max_queries += n * 6
     rare_limit, popular_streak = 150_000, 0
     if p["rare"]:
-        log(T("💎 Ищу редкие: сначала пластинки с наименьшим числом прослушиваний (до 150 тыс.)"))
+        log(T("💎 Looking for rare ones: records with the fewest plays first (up to 150K)"))
     if p["only"]:
-        log(T("🎯 Ищу: {what}. Сначала беру «чистые» куски, потом «с примесью»; таких мест мало — копать придётся дольше",
-              what=what_ru(p)))
+        log(T("🎯 Looking for: {what}. Clean parts first, then parts with extras; such parts are rare, "
+              "so digging takes longer",
+              what=what_label(p)))
     pipe = Pipeline(sess, state, n, on_accept=lambda t: hist.add(t["id"]))
-    net_stopped = False                   # 429 или бот-проверка: сеть стоп, скачанное дорабатываем
+    net_stopped = False                   # 429 or a bot check: network stops, downloaded tracks are finished
 
     try:
         while True:
             if state.stop:
-                log(T("⏹ Остановлено"))
+                log(T("⏹ Stopped"))
                 break
             acc, busy = pipe.counts()
             if acc >= n:
                 break
-            # без забегания вперёд: не скачиваем больше, чем может понадобиться, и больше, чем успеем разобрать
+            # no running ahead: don't download more than may be needed, nor more than can be analysed
             if net_stopped or acc + busy >= n or busy >= pipe.slots:
                 if net_stopped and not busy:
                     break
@@ -589,26 +652,26 @@ def run_dig(params: dict, root: Path, state: JobState):
                 pipe.wait(0.5)
                 continue
             if attempts >= max_attempts:
-                log(T("😕 Перебрал слишком много пластинок — попробуйте другие теги или ослабьте фильтры."))
+                log(T("😕 Went through too many records — try other tags or loosen the filters."))
                 break
             if not pool:
                 if queries >= max_queries or empty_streak >= 6:
-                    log(T("😕 Поиск больше ничего не находит. Попробуйте другие теги."))
+                    log(T("😕 The search finds nothing more. Try other tags."))
                     break
                 yr = (p["y0"], p["y1"]) if p["year_filter"] else (None, None)
                 q = build_query(p["tags"], *yr, rng, only=p["only"], rare=p["rare"])
                 queries += 1
-                pipe.status(net=T("Ищу: «{q}»", q=q))
+                pipe.status(net=T("Searching: “{q}”", q=q))
                 res = fetcher.search(q)
                 fresh = [r for r in res if r["id"] not in hist.seen and r["id"] not in tried and not basic_filter(r)]
-                log(T("🔎 «{q}»: найдено {n}, новых подходящих {k}", q=q, n=len(res), k=len(fresh)))
+                log(T("🔎 “{q}”: found {n}, new suitable {k}", q=q, n=len(res), k=len(fresh)))
                 if not fresh:
                     empty_streak += 1
                     continue
                 empty_streak = 0
-                rng.shuffle(fresh)            # копаем вглубь выдачи, а не только первые строчки
+                rng.shuffle(fresh)            # dig deep into the results, not only the first lines
                 if p["rare"]:
-                    # сначала самые малопрослушиваемые; без счётчика — дальние строчки выдачи
+                    # least played first; without a counter — the far lines of the results
                     known = sorted([r for r in fresh if r.get("views") is not None], key=lambda r: r["views"])
                     unknown = [r for r in fresh if r.get("views") is None]
                     fresh = known[:4] + unknown[:2] if known else unknown
@@ -621,7 +684,7 @@ def run_dig(params: dict, root: Path, state: JobState):
             label = f"{cand.get('artist') or '?'} — {cand.get('title') or '?'}"
             path = None
             try:
-                pipe.status(net=T("Смотрю: {label}", label=label))
+                pipe.status(net=T("Checking: {label}", label=label))
                 info = fetcher.probe(cand)
                 title = info.get("track") or cand.get("title") or info.get("title") or "Untitled"
                 artist = (info.get("artist") or cand.get("artist") or info.get("creator") or
@@ -631,31 +694,31 @@ def run_dig(params: dict, root: Path, state: JobState):
                 dur = info.get("duration") or cand.get("duration") or 0
                 label = f"{artist} — {title}"
                 if dur and (dur < 95 or dur > 600):
-                    log(T("⏭ {label}: длина {sec} с — пропускаю", label=label, sec=int(dur)))
+                    log(T("⏭ {label}: length {sec} s — skipping", label=label, sec=int(dur)))
                     continue
                 views = info.get("view_count")
                 if views is None:
                     views = cand.get("views")
                 if p["rare"] and views is not None and views > rare_limit:
-                    log(T("⏭ {label}: слишком известная ({views} прослушиваний)", label=label, views=human_count(views)))
+                    log(T("⏭ {label}: too well known ({views} plays)", label=label, views=human_count(views)))
                     popular_streak += 1
                     if popular_streak >= 6 and rare_limit < 3_000_000:
                         rare_limit *= 2
                         popular_streak = 0
-                        log(T("   (редкое тут не находится — поднимаю планку до {n})", n=human_count(rare_limit)))
+                        log(T("   (nothing rare here — raising the limit to {n})", n=human_count(rare_limit)))
                     continue
                 popular_streak = 0
                 if p["year_filter"]:
                     ok, year, why = era_check(cand, info, p["y0"], p["y1"], p["strict_year"])
-                else:                                   # годы не фильтруем — год только для подписи
+                else:                                   # years aren't filtered — the year is only for the caption
                     ok, year, why = True, era_check(cand, info, 1900, 2100, False)[1], ""
                 if not ok:
-                    log(T("⏭ {label}: не та эпоха ({why})", label=label, why=why))
+                    log(T("⏭ {label}: wrong era ({why})", label=label, why=why))
                     continue
-                pipe.status(net=T("Скачиваю: {label}", label=label))
+                pipe.status(net=T("Downloading: {label}", label=label))
                 extra = [str(year)] if year else []
                 if views is not None:
-                    extra.append(T("{views} прослушиваний", views=human_count(views)))
+                    extra.append(T("{views} plays", views=human_count(views)))
                 log(f"⬇ {label}" + (f" ({', '.join(extra)})" if extra else ""))
                 path = fetcher.download(cand, info)
                 if state.stop:
@@ -664,20 +727,22 @@ def run_dig(params: dict, root: Path, state: JobState):
                              album=info.get("album") or cand.get("album") or "", year=year,
                              url=f"https://music.youtube.com/watch?v={cand['id']}", query=cand.get("query", ""),
                              thumb=info.get("thumbnail") or "", views=views)
-                pipe.submit(path, track)                # файл удалит конвейер после анализа
+                pipe.submit(path, track)                # the pipeline deletes the file after analysis
                 path = None
-            except Stopped:                             # «Остановить» посреди запроса — не ждём ответа
-                log(T("⏹ Остановлено"))
+            except Stopped:                             # "Stop" in the middle of a request — don't wait for the answer
+                log(T("⏹ Stopped"))
                 break
             except BotBlocked as e:
                 log(f"⛔ {e}")
-                log(T("   Сеть остановлена, чтобы не перебирать пластинки впустую; уже скачанное дорабатываю."))
+                log(T("   Network stopped so as not to burn through records; finishing what's already "
+                      "downloaded."))
                 net_stopped = True
             except Exception as e:
                 msg = explain_error(e)
                 log(f"✕ {label}: {msg}")
                 if "429" in msg:
-                    log(T("   Сеть остановлена, чтобы YouTube не ограничил сильнее; уже скачанное дорабатываю."))
+                    log(T("   Network stopped so YouTube doesn't restrict more; finishing what's already "
+                          "downloaded."))
                     net_stopped = True
                 if not isinstance(e, RuntimeError):
                     traceback.print_exc()
@@ -687,14 +752,14 @@ def run_dig(params: dict, root: Path, state: JobState):
                 if fetcher.found_browser:
                     with state.lock:
                         state.found_cookies = fetcher.found_browser
-    except Stopped:                         # «Остановить» во время поиска — не ждём ответа
-        log(T("⏹ Остановлено"))
+    except Stopped:                         # "Stop" during a search — don't wait for the answer
+        log(T("⏹ Stopped"))
     pipe.finish()
     return sess.finish(pipe.accepted)
 
 
 def run_local(files: list[tuple[Path, str]], params: dict, root: Path, state: JobState):
-    """Режем свои файлы (рипы с винила и т.п.) — параллельно. files = [(путь, исходное имя)]"""
+    """Cut your own files (vinyl rips etc.) — in parallel. files = [(path, original name)]"""
     p = normalize_params(params)
     sess = Session(root, state, p, "my-files")
     pipe = Pipeline(sess, state, len(files), lenient=True)
@@ -704,17 +769,18 @@ def run_local(files: list[tuple[Path, str]], params: dict, root: Path, state: Jo
             continue
         stem = Path(orig).stem
         artist, title = (stem.split(" - ", 1) if " - " in stem else ("", stem))
-        track = dict(id=f"local-{i}-{slug(stem, 30)}", title=title.strip() or stem, artist=artist.strip() or T("Мой файл"),
+        track = dict(id=f"local-{i}-{slug(stem, 30)}", title=title.strip() or stem, artist=artist.strip() or T("My "
+                                                                                                               "file"),
                      album="", year=None, url="", query="", thumb="", local=True)
         pipe.submit(path, track)
     pipe.finish()
     if state.stop:
-        state.log(T("⏹ Остановлено"))
+        state.log(T("⏹ Stopped"))
     return sess.finish(pipe.accepted)
 
 
 def find_source(dig_dir: Path, track: dict) -> Path | None:
-    """Исходный трек в папке ящика (у старых ящиков пути в dig.json нет — ищем по имени)."""
+    """The source track in the crate folder (old crates have no path in dig.json — search by name)."""
     cands = [dig_dir / track["src"]] if track.get("src") else []
     cands.append(dig_dir / SRC_DIR / (safe_name(f"{track.get('artist')} - {track.get('title')}") + ".mp3"))
     root = dig_dir.resolve()
@@ -726,7 +792,7 @@ def find_source(dig_dir: Path, track: dict) -> Path | None:
 
 
 def run_rerun(dig_dir: Path, old: dict, params: dict, root: Path, state: JobState):
-    """Повторный прогон уже найденной пластинки с новыми настройками (питчинг/стретч, тип и длина лупа…)."""
+    """Re-run an already found record with new settings (pitching/stretching, loop type and length...)."""
     p = normalize_params(params)
     track = {k: old.get(k) for k in ("id", "title", "artist", "album", "year", "url", "query", "thumb", "views")}
     if old.get("local"):
@@ -734,16 +800,16 @@ def run_rerun(dig_dir: Path, old: dict, params: dict, root: Path, state: JobStat
     label = f"{track['artist']} — {track['title']}"
     sess = Session(root, state, p, "rerun " + (track["title"] or "track"))
     log = state.log
-    log(T("🔁 Прогоняю заново: {label} — {what}, {bars} такт(а), до {n} лупов",
-          label=label, what=what_ru(p), bars=p["bars"], n=p["n_loops"]))
+    log(T("🔁 Re-running: {label} — {what}, {bars} bar(s), up to {n} loops",
+          label=label, what=what_label(p), bars=p["bars"], n=p["n_loops"]))
     pipe = Pipeline(sess, state, 1, lenient=True)
     try:
         src, downloaded = find_source(dig_dir, old), False
         if src is None:
             if old.get("local") or not old.get("url"):
-                raise RuntimeError(T("исходный файл не сохранился — перетащите его в окно ещё раз"))
-            log(T("   исходника нет в папке ящика — скачиваю ещё раз"))
-            pipe.status(net=T("Скачиваю: {label}", label=label))
+                raise RuntimeError(T("the source file was not kept — drag it into the window again"))
+            log(T("   the source isn't in the crate folder — downloading again"))
+            pipe.status(net=T("Downloading: {label}", label=label))
             fetcher = Fetcher(root / ".tmp", log, p["cookies_browser"], cookie_file=APP_DIR / "cookies.txt",
                               stop=lambda: state.stop)
             src, downloaded = fetcher.download({"id": old["id"]}), True
@@ -751,52 +817,54 @@ def run_rerun(dig_dir: Path, old: dict, params: dict, root: Path, state: JobStat
                 with state.lock:
                     state.found_cookies = fetcher.found_browser
         if not state.stop:
-            pipe.submit(src, track, cleanup=downloaded)   # исходник из ящика не удаляем
+            pipe.submit(src, track, cleanup=downloaded)   # the source in the crate is not deleted
     except Stopped:
-        log(T("⏹ Остановлено"))
+        log(T("⏹ Stopped"))
     except Exception as e:
         log(f"✕ {label}: {explain_error(e)}")
     pipe.finish()
     ok = pipe.accepted > 0
     if not ok and not state.stop:
         with state.lock:
-            state.note = T("С этими настройками лупы не нашлись — подробности в журнале")
+            state.note = T("No loops found with these settings — details in the log")
     return sess.finish(int(ok))
 
 
 def write_meta(dig_dir: Path, meta: dict):
+    """Write dig.json, credits.txt and MODEL_SAMPLES.txt of the crate."""
     (dig_dir / "dig.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), "utf8")
-    lines = [T("CrateDigger — откуда взяты лупы (пригодится для клиринга семплов)"), ""]
+    lines = [T("CrateDigger — where the loops come from (useful for sample clearance)"), ""]
     for t in meta["tracks"]:
         lines.append(f"{t['artist']} — {t['title']}" + (f" ({t['year']})" if t.get("year") else ""))
         lines.append(f"  {t['url']}")
         for l in t["loops"]:
             a, b = l["src_start"], l["src_end"]
-            how = (T("исходный темп {bpm}, растяжение {pct:+.1f}%", bpm=l["real_bpm"], pct=l["stretch_pct"])
-                   if l.get("real_bpm") else T("без сетки, вырезано ровно под темп"))
-            kind = (f", {T(iso.NAME_RU[l['kind']])}{T(' (с примесью)') if l.get('mixed') else ''}"
+            how = (T("original tempo {bpm}, stretch {pct:+.1f}%", bpm=l["real_bpm"], pct=l["stretch_pct"])
+                   if l.get("real_bpm") else T("no grid, cut exactly to tempo"))
+            kind = (f", {T(iso.KIND_LABEL[l['kind']])}{T(" (with extras)") if l.get('mixed') else ''}"
                     if l.get("kind") else "")
             lines.append(f"  {l['name']}: {int(a // 60)}:{a % 60:05.2f}–{int(b // 60)}:{b % 60:05.2f}, "
-                         + T("{bars} такт(а)", bars=f"{l['bars']:g}") + f", {how}{kind}")
+                         + T("{bars} bar(s)", bars=f"{l['bars']:g}") + f", {how}{kind}")
         lines.append("")
     (dig_dir / "credits.txt").write_text("\n".join(lines), "utf8")
     params = meta.get("params") or {}
     mono = params.get("formats") in ("both", "mono")
-    ms = [T("Как играть эти лупы на Elektron Model:Samples"), "",
-          (T("1. Перекиньте файлы из папки ModelSamples_mono16 через Elektron Transfer.") if mono else
-           T("1. Перекиньте файлы из папки Stereo_24bit через Elektron Transfer (он сам переведёт в моно).")),
-          T("2. Темп паттерна = число в имени файла (Gmaj90Name1 -> 90 BPM)."),
-          T("3. Длина трека (Track Length) = количество шагов из таблицы ниже, триг на шаге 1."),
-          T("   Луп перезапускается каждый цикл, поэтому никогда не «уплывает»."),
-          T("4. Чопы: лупы ровно по тактам, поэтому ручка START делит их на равные части:"),
-          T("   0, 16, 32, 48, 64, 80, 96, 112 ≈ восьмые части лупа. Ставьте разные START на"),
-          T("   разные шаги (параметр-локи) — получится перенарезка, как на MPC."),
-          T("5. Лупы с одинаковой цифрой Camelot или соседней (8A, 8B, 7A, 9A) звучат вместе."),
-          T("6. Если шагов больше 64 — поставьте у трека SCALE 1/2X и длину вдвое меньше."),
-          *([T("7. Файлы разложены по папкам: ModelSamples_mono16/<тональность>/<BPM>/ —"),
-             T("   перекиньте папку целиком, на приборе найдёте нужное по тональности и темпу.")]
+    ms = [T("How to play these loops on the Elektron Model:Samples"), "",
+          (T("1. Transfer the files from the ModelSamples_mono16 folder with Elektron Transfer.") if mono else
+           T("1. Transfer the files from the Stereo_24bit folder with Elektron Transfer (it converts "
+             "to mono itself).")),
+          T("2. Pattern tempo = the number in the file name (Gmaj90Name1 -> 90 BPM)."),
+          T("3. Track Length = the number of steps from the table below, trig on step 1."),
+          T("   The loop restarts every cycle, so it never drifts."),
+          T("4. Chops: the loops are exactly bar-length, so the START knob splits them evenly:"),
+          T("   0, 16, 32, 48, 64, 80, 96, 112 ≈ eighths of the loop. Put different START values on"),
+          T("   different steps (parameter locks) — you get re-chopping, like on an MPC."),
+          T("5. Loops with the same or a neighbouring Camelot number (8A, 8B, 7A, 9A) sound good together."),
+          T("6. If there are more than 64 steps, set the track SCALE to 1/2X and halve the length."),
+          *([T("7. The files are sorted into folders: ModelSamples_mono16/<key>/<BPM>/ —"),
+             T("   transfer the whole folder and find loops on the device by key and tempo.")]
             if mono and params.get("sort_ms") else []), "",
-          f"{T('Файл'):<34}{'BPM':>5}{T('Тактов'):>9}{T('Шагов'):>7}  {T('Тональн.'):<8} Camelot"]
+          f"{T("File"):<34}{'BPM':>5}{T("Bars"):>9}{T("Steps"):>7}  {T("Key"):<8} Camelot"]
     for t in meta["tracks"]:
         for l in t["loops"]:
             ms.append(f"{l['name']:<34}{l['bpm']:>5}{l['bars']:>9g}{l['steps']:>7}  {l['key']:<8} {l['camelot']}")
