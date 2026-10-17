@@ -103,7 +103,7 @@ select.ghost{max-width:260px}
 .loops{display:flex;flex-direction:column;gap:8px}
 .loop{display:grid;grid-template-columns:44px minmax(180px,250px) 1fr auto;align-items:center;gap:12px;background:var(--panel);
   border:1px solid var(--line);border-radius:10px;padding:8px 10px 8px 8px}
-.loop.compat{box-shadow:0 0 0 2px var(--hue) inset}
+.loop.compat{box-shadow:0 0 0 2px var(--chue, var(--hue)) inset}
 .loop.playing{border-color:var(--ink)}
 @media (max-width:700px){.loop{grid-template-columns:44px 1fr auto}.loop canvas{grid-column:1/-1;order:5}}
 .play{width:44px;height:44px;border-radius:50%;border:2px solid var(--ink);background:#fff;cursor:pointer;display:grid;place-items:center}
@@ -861,10 +861,36 @@ function updateCount(){
   if(!document.querySelector("#records .digsec") && !$("#records .empty"))
     $("#records").innerHTML = `<div class="empty"><strong>${esc(t("emptyTitle"))}</strong>${esc(t("emptyText"))}</div>`;
 }
+/* Key compatibility outline.
+   Nothing playing: loops compatible with the hovered loop (by their own keys).
+   During a jam: always relative to the master loop (the first one started), taking into account that
+   every next loop is played at the master's tempo, i.e. pitched by 12*log2(masterBpm/bpm) semitones
+   (e.g. Fmin 75 under Emin 70 sounds as Emin). A loop that ends up more than KEY_TOL_CENTS out of tune
+   with the master (pitch shift + the records' own tuning) is not outlined. With "Tempo from first loop"
+   off nothing is pitched, so the original keys are compared. */
+const KEY_TOL_CENTS = 35;
+const NOTE_IDX = {C:0,"C#":1,D:2,"D#":3,E:4,F:5,"F#":6,G:7,"G#":8,A:9,"A#":10,B:11};
+function camelotOf(tonic, mode){
+  const rel = mode==="maj" ? tonic : (tonic+3)%12;
+  return `${((rel*7)%12+7)%12+1}${mode==="maj"?"B":"A"}`;
+}
+function jamCamelot(o, m){             // Camelot code of loop o when played under master voice m (null = out of tune)
+  if(!$("#syncRate").checked) return o.camelot;
+  const k = /^([A-G]#?)(maj|min)$/.exec(o.key || ""); if(!k) return o.camelot;
+  const cents = 1200*Math.log2(m.bpm / o.bpm) + (o.tuning_cents||0) - (m.l.tuning_cents||0);
+  const semis = Math.round(cents/100);
+  if(Math.abs(cents - semis*100) > KEY_TOL_CENTS) return null;
+  return camelotOf((NOTE_IDX[k[1]] + semis + 1200) % 12, k[2]);
+}
 function highlight(l){
+  const m = master();
+  document.documentElement.style.setProperty("--chue", m ? hue(m.l.camelot) : "");
   document.querySelectorAll(".loop").forEach(e=>{
     const o = rendered[e.dataset.uid];
-    e.classList.toggle("compat", !!(l && o && o!==l && compatible(l.camelot,o.camelot)));
+    let on = false;
+    if(m) on = !!(o && o!==m.l && (c => c && compatible(m.l.camelot, c))(jamCamelot(o, m)));
+    else on = !!(l && o && o!==l && compatible(l.camelot, o.camelot));
+    e.classList.toggle("compat", on);
   });
 }
 function drawWave(cv, peaks, pos){
@@ -989,8 +1015,10 @@ $("#stopAll").onclick = ()=>Object.keys(voices).forEach(stopLoop);
 document.addEventListener("keydown", e=>{ if(e.code==="Space" && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)){ e.preventDefault(); Object.keys(voices).forEach(stopLoop);} });
 function updateJam(){
   const m = master(), n = Object.keys(voices).length;
-  $("#jamTempo").innerHTML = m ? `${m.bpm} BPM <small>${esc(t("playingN",{n}))}</small>` : `— <small>${esc(t("nothingPlaying"))}</small>`;
+  $("#jamTempo").innerHTML = m ? `${m.bpm} BPM · ${esc(m.l.key)} <small>${esc(t("playingN",{n}))}</small>` : `— <small>${esc(t("nothingPlaying"))}</small>`;
+  highlight(null);                       // the outline follows the master loop while something plays
 }
+$("#syncRate").addEventListener("change", ()=>highlight(null));
 let raf=null;
 function tick(){
   if(raf) return;

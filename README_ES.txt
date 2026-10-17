@@ -1,4 +1,4 @@
-CRATEDIGGER 1.3 — excavar samples para boom bap
+CRATEDIGGER 1.3.1 — excavar samples para boom bap
 =================================================
 (Русский: README.txt · English: README_EN.txt)
 
@@ -41,7 +41,14 @@ CÓMO SE USA
 3. El botón ▶ reproduce el loop en bucle. Puedes encender varios a la vez:
    los siguientes entran justo al inicio del compás y siguen el tempo del primero,
    así compruebas en la misma ventana cómo suenan juntos.
-   Al pasar el ratón por un loop se marcan los loops de tonalidad compatible.
+   Si no suena nada, al pasar el ratón por un loop se marcan los loops de tonalidad
+   compatible. Durante el jam el marco muestra siempre los loops compatibles con el
+   primero encendido (el principal), teniendo en cuenta que el siguiente loop sigue su
+   tempo y cambia de altura: por ejemplo, con Emin 70 se marcan Fmin 75 y F#min 80
+   (ralentizados suenan en Emin). Los loops que quedan desafinados más de 35 cents no se
+   marcan. La tonalidad del principal se ve en la barra inferior junto al BPM. Con
+   «Tempo del primer loop» desactivado no se cambia la altura y se comparan las
+   tonalidades originales.
 4. ★ — Favoritos: una copia del loop va a la carpeta Favorites. Otro clic quita la
    estrella y la copia. Todo lo que alguna vez marcaste está reunido en la caja
    «★ Favoritos», la primera de la lista «Añadir una caja anterior».

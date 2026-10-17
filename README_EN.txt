@@ -1,4 +1,4 @@
-CRATEDIGGER 1.3 — sample digging for boom bap
+CRATEDIGGER 1.3.1 — sample digging for boom bap
 ===============================================
 (Русский: README.txt · Español: README_ES.txt)
 
@@ -41,7 +41,13 @@ HOW TO USE
 3. The ▶ button plays a loop on repeat. You can start several at once:
    the next ones come in exactly at the top of a bar and follow the tempo of the first —
    so you can hear right in the window how loops sound together.
-   Hovering a loop outlines the loops in a compatible key.
+   When nothing plays, hovering a loop outlines the loops in a compatible key.
+   During a jam the outline always shows the loops compatible with the first one
+   started (the master), taking into account that the next loop follows its tempo and
+   shifts in pitch: e.g. under Emin 70, Fmin 75 and F#min 80 are outlined (slowed down
+   they sound in Emin). Loops that end up more than 35 cents out of tune are not
+   outlined. The master's key is shown in the bottom bar next to the BPM. With
+   "Tempo from first loop" off nothing is pitched and the original keys are compared.
 4. ★ — Favorites: a copy of the loop goes to the Favorites folder. Clicking again
    removes the star and the copy. Everything ever starred is collected in the
    "★ Favorites" crate — the first item in the "Add a past crate" list.
