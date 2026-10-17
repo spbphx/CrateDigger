@@ -145,6 +145,33 @@ def write_wav(path, x: np.ndarray, sr: int = SR, bits: int = 24):
         w.writeframes(data)
 
 
+def read_wav(path) -> np.ndarray:
+    """Read a 16- or 24-bit PCM WAV written by write_wav(). -> float32 (N, channels) in -1..1"""
+    with wave.open(str(path), "rb") as w:
+        ch, sw, n = w.getnchannels(), w.getsampwidth(), w.getnframes()
+        raw = w.readframes(n)
+    if sw == 2:
+        x = np.frombuffer(raw, "<i2").astype(np.float32) / 32768.0
+    else:
+        b = np.frombuffer(raw, np.uint8).reshape(-1, 3).astype(np.int32)
+        v = b[:, 0] | (b[:, 1] << 8) | (b[:, 2] << 16)
+        x = (np.where(v >= 1 << 23, v - (1 << 24), v) / float(1 << 23)).astype(np.float32)
+    return x.reshape(-1, ch)
+
+
+def pitch_loop(loop: np.ndarray, rate: float, out_len: int) -> np.ndarray:
+    """Play a finished loop `rate` times faster (higher) or slower (lower), like the jam player does,
+    and return exactly out_len samples. The loop is resampled as three copies in a row and the middle
+    one is kept, so the filter has real neighbours at the seam and the loop stays seamless."""
+    n = len(loop)
+    z, real = varispeed(np.concatenate([loop, loop, loop]), rate)
+    a = int(round(n / real))
+    z = z[a:a + out_len]
+    if len(z) < out_len:
+        z = np.concatenate([z, np.zeros((out_len - len(z),) + z.shape[1:], np.float32)])
+    return z
+
+
 # --------------------------------------------------------------------------- spectrum
 def mel_filterbank(sr, n_fft, n_mels=64, fmin=30.0, fmax=11000.0):
     """Triangular mel filters. -> (filters (n_mels, bins), centre frequencies in Hz)"""

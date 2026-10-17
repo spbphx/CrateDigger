@@ -239,6 +239,7 @@ body.debug .icon.dbgonly{display:inline-block}
   <label data-i18n-title="syncTitle"><input type="checkbox" id="syncRate" checked><span data-i18n="syncRate">Tempo from first loop</span></label>
   <label><span data-i18n="volume">Volume</span> <input type="range" id="vol" min="0" max="1" step="0.01" value="0.85"></label>
   <button class="ghost" id="stopAll" data-i18n="stopAll">Stop all</button>
+  <button class="ghost" id="jamZip" disabled data-i18n="jamZip" data-i18n-title="jamZipTitle">Download jam</button>
   <button class="zip" id="zipBtn" disabled data-i18n-title="zipTitle"></button>
   <span class="jamhint" data-i18n="jamHint">You can play several loops — the next ones come in at the top of the bar. Space stops everything.</span>
 </div>
@@ -281,7 +282,7 @@ ru: {
   starting:"Начинаю…", log:"Журнал", working:"Работаю…", stError:"Ошибка — подробности в журнале", stStopped:"Остановлено", stDone:"Готово",
   emptyTitle:"Здесь появятся пластинки и лупы", emptyText:"Введите теги слева или оставьте поле пустым и нажмите «Копать». Новые копания добавляются вниз.",
   nothingPlaying:"ничего не играет", playingN:"играет лупов: {n}", syncRate:"Темп по первому лупу",
-  syncTitle:"Следующие лупы подстраиваются под темп первого включённого", volume:"Громкость", stopAll:"Остановить всё",
+  syncTitle:"Следующие лупы подстраиваются под темп первого включённого", volume:"Громкость", stopAll:"Остановить всё", jamZip:"Скачать джем", jamZipTitle:"ZIP с играющими лупами — каждый с тем питчем, с которым он звучит в джеме, и с новыми тональностью и BPM в имени",
   zip:"Скачать все в ZIP", zipN:"Скачать все в ZIP ({n})", zipTitle:"Все лупы с экрана как есть, разложенные по папкам: BPM, внутри тональность",
   zipBuilding:"Собираю ZIP…", zipFail:"Не получилось собрать ZIP", zipDone:"Скачано {n} {w} в {name}", zipMissing:", не нашёл файлов: {m}",
   jamHint:"Можно включить несколько лупов — следующие вступят с начала такта. Пробел — стоп.",
@@ -342,7 +343,7 @@ en: {
   starting:"Starting…", log:"Log", working:"Working…", stError:"Error — details in the log", stStopped:"Stopped", stDone:"Done",
   emptyTitle:"Records and loops will appear here", emptyText:"Type tags on the left or leave the field empty and press “Dig”. New digs are added below.",
   nothingPlaying:"nothing playing", playingN:"loops playing: {n}", syncRate:"Tempo from first loop",
-  syncTitle:"Loops you start next follow the tempo of the first one", volume:"Volume", stopAll:"Stop all",
+  syncTitle:"Loops you start next follow the tempo of the first one", volume:"Volume", stopAll:"Stop all", jamZip:"Download jam", jamZipTitle:"ZIP of the loops playing now — each pitched as it sounds in the jam, with its new key and BPM in the name",
   zip:"Download all as ZIP", zipN:"Download all as ZIP ({n})", zipTitle:"All loops on screen as they are, sorted into folders: BPM, then key",
   zipBuilding:"Building ZIP…", zipFail:"Couldn't build the ZIP", zipDone:"Downloaded {n} {w} to {name}", zipMissing:", files not found: {m}",
   jamHint:"You can play several loops — the next ones come in at the top of the bar. Space stops everything.",
@@ -403,7 +404,7 @@ es: {
   starting:"Empezando…", log:"Registro", working:"Trabajando…", stError:"Error: detalles en el registro", stStopped:"Detenido", stDone:"Listo",
   emptyTitle:"Aquí aparecerán los discos y los loops", emptyText:"Escribe etiquetas a la izquierda o deja el campo vacío y pulsa «Excavar». Las nuevas excavaciones se añaden abajo.",
   nothingPlaying:"no suena nada", playingN:"loops sonando: {n}", syncRate:"Tempo del primer loop",
-  syncTitle:"Los siguientes loops siguen el tempo del primero que encendiste", volume:"Volumen", stopAll:"Parar todo",
+  syncTitle:"Los siguientes loops siguen el tempo del primero que encendiste", volume:"Volumen", stopAll:"Parar todo", jamZip:"Descargar jam", jamZipTitle:"ZIP con los loops que suenan: cada uno con el pitch con el que suena en el jam y con su nueva tonalidad y BPM en el nombre",
   zip:"Descargar todo en ZIP", zipN:"Descargar todo en ZIP ({n})", zipTitle:"Todos los loops en pantalla tal cual, ordenados en carpetas: BPM y, dentro, tonalidad",
   zipBuilding:"Preparando ZIP…", zipFail:"No se pudo crear el ZIP", zipDone:"Descargados {n} {w} en {name}", zipMissing:", archivos no encontrados: {m}",
   jamHint:"Puedes encender varios loops: los siguientes entran al inicio del compás. Espacio para parar.",
@@ -1012,11 +1013,31 @@ function stopLoop(id){
   drawWave(v.el.querySelector(".wave"), v.l.peaks, -1); updateJam();
 }
 $("#stopAll").onclick = ()=>Object.keys(voices).forEach(stopLoop);
+/* "Download jam": the loops playing now, pitched exactly as they play (rate = master BPM / loop BPM),
+   in a ZIP named after the master loop; the server renames them to their new key and BPM */
+$("#jamZip").onclick = async ()=>{
+  const v = Object.values(voices).sort((a, b)=>a.t0 - b.t0);       // the master (first started) goes first
+  if(!v.length) return;
+  const btn = $("#jamZip"); btn.disabled = true;
+  try{
+    const r = await fetch("/api/jam_zip",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({items: v.map(x=>({dig:x.l.dig, name:x.l.name, rate:x.rate}))})});
+    if(!r.ok){ const e = await r.json().catch(()=>({})); toast(e.error||t("zipFail")); return; }
+    const blob = await r.blob();
+    const name = (/filename="([^"]+)"/.exec(r.headers.get("Content-Disposition")||"")||[])[1] || "jam.zip";
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.append(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 60000);
+    const got = +(r.headers.get("X-Loops")||0);
+    toast(t("zipDone",{n:got, w:pl(got,"loops"), name}));
+  }catch(e){ toast(t("zipFail")); }
+  finally{ btn.disabled = !Object.keys(voices).length; }
+};
 document.addEventListener("keydown", e=>{ if(e.code==="Space" && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)){ e.preventDefault(); Object.keys(voices).forEach(stopLoop);} });
 function updateJam(){
   const m = master(), n = Object.keys(voices).length;
   $("#jamTempo").innerHTML = m ? `${m.bpm} BPM · ${esc(m.l.key)} <small>${esc(t("playingN",{n}))}</small>` : `— <small>${esc(t("nothingPlaying"))}</small>`;
   highlight(null);                       // the outline follows the master loop while something plays
+  $("#jamZip").disabled = !n;
 }
 $("#syncRate").addEventListener("change", ()=>highlight(null));
 let raf=null;

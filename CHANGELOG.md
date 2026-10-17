@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.3.2
+- "Download jam" button in the jam bar: a ZIP of the loops playing now, each pitched exactly as it plays in the jam (speed = master BPM / loop BPM), named after the master loop (`Gmaj95-<date>-<time>.zip`). The key and BPM at the start of each loop name change to the values after the pitch shift.
+
 ## 1.3.1
 - Key highlighting during a jam follows the master loop (the first one started) and takes the pitch shift into account: every next loop is played at the master's tempo, so e.g. Fmin 75 and F#min 80 are outlined under Emin 70. Loops more than 35 cents out of tune after the shift are not outlined. With "Tempo from first loop" off, original keys are compared; with nothing playing, hovering works as before.
 - The master loop's key is shown next to the BPM in the jam bar.

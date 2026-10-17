@@ -1,4 +1,4 @@
-CRATEDIGGER 1.3.1 — excavar samples para boom bap
+CRATEDIGGER 1.3.2 — excavar samples para boom bap
 =================================================
 (Русский: README.txt · English: README_EN.txt)
 
@@ -49,6 +49,12 @@ CÓMO SE USA
    marcan. La tonalidad del principal se ve en la barra inferior junto al BPM. Con
    «Tempo del primer loop» desactivado no se cambia la altura y se comparan las
    tonalidades originales.
+   «Descargar jam» (junto a «Parar todo»): un ZIP con los loops que suenan ahora, cada uno
+   con el pitch exacto con el que suena en el jam. El archivo lleva el nombre del loop
+   principal (Gmaj95-<fecha>-<hora>.zip) y en los nombres de los loops cambian la tonalidad
+   y el BPM a los que resultan tras el pitch: Amaj80PName1 con un principal a 95 BPM pasa
+   a Cmaj95PName1 (+3 semitonos; Cmaj y Gmaj son vecinos en Camelot). El resto del nombre
+   no cambia.
 4. ★ — Favoritos: una copia del loop va a la carpeta Favorites. Otro clic quita la
    estrella y la copia. Todo lo que alguna vez marcaste está reunido en la caja
    «★ Favoritos», la primera de la lista «Añadir una caja anterior».

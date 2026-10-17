@@ -36,7 +36,7 @@ SETTINGS_PATH = APP_DIR / "settings.json"
 FAV_DIR = "Favorites"          # copies of favourite loops on disk
 FEEDBACK_DIR = "Feedback"      # Debugging mode: loops marked "wrong match" with the analyzer's readings
 FAV_KEY = "★favorites"         # the Favorites "crate" on screen: collected from all crates
-VERSION = "1.3.1"
+VERSION = "1.3.2"
 
 
 def default_out_dir() -> Path:
@@ -353,6 +353,64 @@ def build_ms_zip(items: list[dict]) -> tuple[Path, int, int]:
     return zpath, added, missing
 
 
+NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
+
+def jam_name(l: dict, rate: float, bpm: int) -> str:
+    """Name of a loop after it is pitched by `rate` to `bpm`: the key and BPM at the start of the name
+    change, the rest stays. The key moves by the pitch shift (plus the record's own tuning), rounded
+    to the nearest semitone: Amaj80PTitle1 sped up to 95 BPM -> Cmaj95PTitle1."""
+    m = re.match(r"([A-G]#?)(maj|min)$", l.get("key", ""))
+    head = f"{l.get('key')}{l.get('bpm')}"
+    if not m or not l["name"].startswith(head):
+        return l["name"]
+    import math
+    semis = round((1200 * math.log2(rate) + (l.get("tuning_cents") or 0)) / 100)
+    key = NOTE_NAMES[(NOTE_NAMES.index(m.group(1)) + semis) % 12] + m.group(2)
+    return f"{key}{bpm}{l['name'][len(head):]}"
+
+
+def build_jam_zip(items: list[dict]) -> tuple[Path, int, str]:
+    """"Download jam": the loops playing right now, each pitched exactly as the jam plays it (speed =
+    master BPM / loop BPM), renamed to its new key and BPM. items: [{dig, name, rate}], master first.
+    -> (path of the zip, number of loops, zip name "<master key><BPM>-<date>-<time>.zip")"""
+    import zipfile
+    loops = [(get_loop(str(it.get("dig", "")), str(it.get("name", ""))), it) for it in items]
+    loops = [(l, it) for l, it in loops if l]
+    if not loops:
+        return None, 0, ""
+    master = loops[0][0]
+    mbpm = int(master["bpm"])
+    tmp = out_root() / ".tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
+    zpath = tmp / f"jam_{uuid.uuid4().hex[:8]}.zip"
+    used, added = set(), 0
+    with zipfile.ZipFile(zpath, "w", zipfile.ZIP_STORED) as z:
+        for l, it in loops:
+            files = l.get("files") or {}
+            src = next((safe_path(f"{it['dig']}/{files[k]}") for k in ("stereo", "mono") if files.get(k)), None)
+            if not (src and src.exists()):
+                continue
+            rate = min(2.0, max(0.5, float(it.get("rate") or 1.0)))
+            if abs(rate - 1.0) < 1e-6:                     # the master (or "Tempo from first loop" is off)
+                data, name = src.read_bytes(), l["name"]
+            else:
+                x = dsp.read_wav(src)
+                bpm = int(round(l["bpm"] * rate))
+                out = dsp.pitch_loop(x, rate, int(round(len(x) / rate)))
+                wav = tmp / f"jam_{uuid.uuid4().hex[:8]}.wav"
+                dsp.write_wav(wav, out, bits=24 if src.parent.name == core.STEREO_DIR else 16)
+                data, name = wav.read_bytes(), jam_name(l, rate, bpm)
+                wav.unlink(missing_ok=True)
+            arc, k = f"{name}.wav", 2
+            while arc in used:
+                arc, k = f"{name}_{k}.wav", k + 1
+            z.writestr(arc, data)
+            used.add(arc)
+            added += 1
+    return zpath, added, f"{master['key']}{mbpm}-{time.strftime('%Y-%m-%d-%H-%M')}.zip"
+
+
 def update_loop_meta(dig: str, name: str, **changes):
     """Change fields of a loop in dig.json (and in the running job, if it is that crate)."""
     p = safe_path(f"{dig}/dig.json")
@@ -583,6 +641,22 @@ class Handler(BaseHTTPRequestHandler):
                         SESSION["digs"].clear()
                         SESSION["hidden"].clear()
                 return self._json({"ok": True})
+            if u.path == "/api/jam_zip":           # "Download jam": playing loops, pitched like in the jam
+                zpath, added, zname = build_jam_zip(b.get("items") or [])
+                if not added:
+                    if zpath:
+                        zpath.unlink(missing_ok=True)
+                    return self._json({"error": T("loop files not found on disk")}, 404)
+                data = zpath.read_bytes()
+                zpath.unlink(missing_ok=True)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/zip")
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Content-Disposition", f'attachment; filename="{zname}"')
+                self.send_header("X-Loops", str(added))
+                self.end_headers()
+                self.wfile.write(data)
+                return
             if u.path == "/api/zip":
                 items = b.get("items") or []
                 if not items:

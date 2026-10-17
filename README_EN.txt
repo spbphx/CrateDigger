@@ -1,4 +1,4 @@
-CRATEDIGGER 1.3.1 — sample digging for boom bap
+CRATEDIGGER 1.3.2 — sample digging for boom bap
 ===============================================
 (Русский: README.txt · Español: README_ES.txt)
 
@@ -48,6 +48,11 @@ HOW TO USE
    they sound in Emin). Loops that end up more than 35 cents out of tune are not
    outlined. The master's key is shown in the bottom bar next to the BPM. With
    "Tempo from first loop" off nothing is pitched and the original keys are compared.
+   "Download jam" (next to "Stop all") — a ZIP of the loops playing now, each pitched
+   exactly as it sounds in the jam. The archive is named after the master loop
+   (Gmaj95-<date>-<time>.zip), and the key and BPM in the loop names change to the
+   ones after the pitch shift: Amaj80PName1 under a 95 BPM master becomes Cmaj95PName1
+   (+3 semitones; Cmaj and Gmaj are Camelot neighbours). The rest of the name stays.
 4. ★ — Favorites: a copy of the loop goes to the Favorites folder. Clicking again
    removes the star and the copy. Everything ever starred is collected in the
    "★ Favorites" crate — the first item in the "Add a past crate" list.
