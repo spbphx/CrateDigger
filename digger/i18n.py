@@ -81,6 +81,9 @@ S: dict[str, tuple[str, str]] = {
     "loop files not found on disk": (
         "файлы лупов не найдены на диске",
         "no se encontraron los archivos de los loops"),
+    "no hits found in the loop": (
+        "в лупе не найдено ударов",
+        "no se encontraron golpes en el loop"),
     "the loop's files were not found on disk": (
         "файлы лупа не найдены на диске",
         "no se encontraron los archivos del loop"),

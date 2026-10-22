@@ -29,14 +29,14 @@ from pathlib import Path
 APP_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(APP_DIR))
 
-from digger import core, dsp, i18n  # noqa: E402
+from digger import core, dsp, i18n, oneshots  # noqa: E402
 from digger.i18n import T  # noqa: E402
 
 SETTINGS_PATH = APP_DIR / "settings.json"
 FAV_DIR = "Favorites"          # copies of favourite loops on disk
 FEEDBACK_DIR = "Feedback"      # Debugging mode: loops marked "wrong match" with the analyzer's readings
 FAV_KEY = "★favorites"         # the Favorites "crate" on screen: collected from all crates
-VERSION = "1.3.2"
+VERSION = "1.3.3"
 
 
 def default_out_dir() -> Path:
@@ -411,6 +411,39 @@ def build_jam_zip(items: list[dict]) -> tuple[Path, int, str]:
     return zpath, added, f"{master['key']}{mbpm}-{time.strftime('%Y-%m-%d-%H-%M')}.zip"
 
 
+def build_oneshot_zip(dig: str, name: str) -> tuple[Path | None, int, str]:
+    """"Cut into one-shots": every hit of the loop as its own WAV, in one ZIP.
+    The hits are found by transient detection (digger.oneshots); each sample ends just
+    before the next transient begins, so the hits never overlap and never lose their
+    attack. -> (path of the zip, number of samples, zip name) — or (None, 0, error text)"""
+    l = get_loop(dig, name)
+    if not l:
+        return None, 0, T("loop files not found on disk")
+    files = l.get("files") or {}
+    src = next((safe_path(f"{dig}/{files[k]}") for k in ("stereo", "mono") if files.get(k)), None)
+    if not (src and src.exists()):
+        return None, 0, T("loop files not found on disk")
+    x = dsp.read_wav(src)
+    segs = oneshots.detect_oneshots(x, dsp.SR)
+    if len(segs) < 2:
+        return None, 0, T("no hits found in the loop")
+    import zipfile
+    tmp = out_root() / ".tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
+    zpath = tmp / f"oneshots_{uuid.uuid4().hex[:8]}.zip"
+    bits = 24 if src.parent.name == core.STEREO_DIR else 16
+    base = re.sub(r"[^\w\-]+", "_", name, flags=re.UNICODE).strip("_") or "loop"
+    with zipfile.ZipFile(zpath, "w", zipfile.ZIP_STORED) as z:
+        for i, (s, e) in enumerate(segs, 1):
+            piece = oneshots.cut_oneshot(x, s, e, dsp.SR)
+            wav = tmp / f"oneshot_{uuid.uuid4().hex[:8]}.wav"
+            dsp.write_wav(wav, piece, sr=dsp.SR, bits=bits)
+            z.write(wav, f"{base}_{i:02d}.wav")
+            wav.unlink(missing_ok=True)
+    stamp = time.strftime("%Y-%m-%d_%H-%M")
+    return zpath, len(segs), f"1shots_{l.get('key') or base}_{stamp}.zip"
+
+
 def update_loop_meta(dig: str, name: str, **changes):
     """Change fields of a loop in dig.json (and in the running job, if it is that crate)."""
     p = safe_path(f"{dig}/dig.json")
@@ -683,6 +716,20 @@ class Handler(BaseHTTPRequestHandler):
                             self.wfile.write(chunk)
                 finally:
                     zpath.unlink(missing_ok=True)
+                return
+            if u.path == "/api/oneshots":      # "Cut into one-shots": hits of one loop as WAVs in a ZIP
+                zpath, added, zname = build_oneshot_zip(str(b.get("dig", "")), str(b.get("name", "")))
+                if zpath is None:
+                    return self._json({"error": zname}, 404)
+                data = zpath.read_bytes()
+                zpath.unlink(missing_ok=True)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/zip")
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Content-Disposition", f'attachment; filename="{zname}"')
+                self.send_header("X-Loops", str(added))
+                self.end_headers()
+                self.wfile.write(data)
                 return
             if u.path == "/api/wrong":              # Debugging mode: 👎 wrong match — set or remove
                 wrong = set_wrong(str(b.get("dig", "")), str(b.get("name", "")), bool(b.get("on", True)))

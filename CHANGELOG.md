@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.3
+- Scissors ✂ button on "drums only" loops: cuts the loop into one-shot samples and downloads them all as one ZIP. The button sits in the loop's action row, next to favorite / save / remove — on "drums only" loops the four buttons are packed tighter so the row keeps the same width as the three buttons of other loops.
+- The one-shot ZIP is named `1shots_<key>_<date>_<time>.zip` (e.g. `1shots_Amin_2026-10-22_05-07.zip`).
+- One-shot detection was rebuilt for dense funk breaks: onsets are pooled from three spectral bands plus the full-band envelope (a new hit is often masked in the full envelope by the tail of the previous one, but always rises in its own band — a hat high, a kick low), each candidate must show a real energy step big enough for that band, and every segment is rescanned so hits that were still masked split it. The result is a true one-shot per hit: a loop that used to give 24 samples with several hits inside now gives 32 clean ones (16ths of both bars).
+
 ## 1.3.2
 - "Download jam" button in the jam bar: a ZIP of the loops playing now, each pitched exactly as it plays in the jam (speed = master BPM / loop BPM), named after the master loop (`Gmaj95-<date>-<time>.zip`). The key and BPM at the start of each loop name change to the values after the pitch shift.
 

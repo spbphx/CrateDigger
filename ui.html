@@ -117,6 +117,10 @@ select.ghost{max-width:260px}
 .small button{border:0;background:none;padding:0;color:var(--soft);cursor:pointer;text-decoration:underline dotted;font-size:12.5px}
 canvas.wave{width:100%;height:46px;display:block;cursor:pointer}
 .acts{display:flex;gap:4px}
+/* "drums only" loops have four buttons — they are packed tighter so the row has
+   the same width as the three buttons of the other loops: 4*26+3*2 == 3*34+2*4 */
+.loop.drums .acts{gap:2px}
+.loop.drums .icon{width:26px;height:26px;border-radius:7px;font-size:14px}
 .icon{width:34px;height:34px;border-radius:8px;border:1px solid transparent;background:none;cursor:pointer;color:var(--soft);font-size:17px}
 .icon:hover{border-color:var(--line);color:var(--ink)}
 .icon.on{color:#C08A00}
@@ -238,7 +242,6 @@ body.debug .icon.dbgonly{display:inline-block}
   <div class="tempo" id="jamTempo"></div>
   <label data-i18n-title="syncTitle"><input type="checkbox" id="syncRate" checked><span data-i18n="syncRate">Tempo from first loop</span></label>
   <label><span data-i18n="volume">Volume</span> <input type="range" id="vol" min="0" max="1" step="0.01" value="0.85"></label>
-  <button class="ghost" id="stopAll" data-i18n="stopAll">Stop all</button>
   <button class="ghost" id="jamZip" disabled data-i18n="jamZip" data-i18n-title="jamZipTitle">Download jam</button>
   <button class="zip" id="zipBtn" disabled data-i18n-title="zipTitle"></button>
   <span class="jamhint" data-i18n="jamHint">You can play several loops — the next ones come in at the top of the bar. Space stops everything.</span>
@@ -283,9 +286,12 @@ ru: {
   emptyTitle:"Здесь появятся пластинки и лупы", emptyText:"Введите теги слева или оставьте поле пустым и нажмите «Копать». Новые копания добавляются вниз.",
   nothingPlaying:"ничего не играет", playingN:"играет лупов: {n}", syncRate:"Темп по первому лупу",
   syncTitle:"Следующие лупы подстраиваются под темп первого включённого", volume:"Громкость", stopAll:"Остановить всё", jamZip:"Скачать джем", jamZipTitle:"ZIP с играющими лупами — каждый с тем питчем, с которым он звучит в джеме, и с новыми тональностью и BPM в имени",
-  zip:"Скачать все в ZIP", zipN:"Скачать все в ZIP ({n})", zipTitle:"Все лупы с экрана как есть, разложенные по папкам: BPM, внутри тональность",
+  zip:"Скачать все", zipN:"Скачать все ({n})", zipTitle:"Все лупы с экрана как есть, разложенные по папкам: BPM, внутри тональность",
   zipBuilding:"Собираю ZIP…", zipFail:"Не получилось собрать ZIP", zipDone:"Скачано {n} {w} в {name}", zipMissing:", не нашёл файлов: {m}",
-  jamHint:"Можно включить несколько лупов — следующие вступят с начала такта. Пробел — стоп.",
+  chopTitle:"Нарезать луп на one-shot семплы (ZIP)", chopAria:"Нарезать на one-shot семплы",
+  chopBuild:"Нарезаю на one-shot…", chopFail:"Не получилось нарезать one-shot",
+  chopDone:"Скачано {n} {w} в {name}", oneshots:["one-shot","one-shot'а","one-shot'ов"],
+  jamHint:"Можно включить несколько лупов — следующие вступят с начала такта. <b>Пробел — стоп.</b>",
   waitDig:"Дождитесь окончания копания", needAudio:"Нужны аудиофайлы", uploading:"Загружаю {i} из {n}: {name}", uploadFail:"сбой загрузки",
   rerunWait:"Дождитесь окончания копания и перетащите пластинку ещё раз", rerunning:"Прогоняю «{t}» заново: {s}",
   onlyWhat:"только {list}", or:" или ",
@@ -344,9 +350,12 @@ en: {
   emptyTitle:"Records and loops will appear here", emptyText:"Type tags on the left or leave the field empty and press “Dig”. New digs are added below.",
   nothingPlaying:"nothing playing", playingN:"loops playing: {n}", syncRate:"Tempo from first loop",
   syncTitle:"Loops you start next follow the tempo of the first one", volume:"Volume", stopAll:"Stop all", jamZip:"Download jam", jamZipTitle:"ZIP of the loops playing now — each pitched as it sounds in the jam, with its new key and BPM in the name",
-  zip:"Download all as ZIP", zipN:"Download all as ZIP ({n})", zipTitle:"All loops on screen as they are, sorted into folders: BPM, then key",
+  zip:"Download all", zipN:"Download all ({n})", zipTitle:"All loops on screen as they are, sorted into folders: BPM, then key",
   zipBuilding:"Building ZIP…", zipFail:"Couldn't build the ZIP", zipDone:"Downloaded {n} {w} to {name}", zipMissing:", files not found: {m}",
-  jamHint:"You can play several loops — the next ones come in at the top of the bar. Space stops everything.",
+  chopTitle:"Cut the loop into one-shot samples (ZIP)", chopAria:"Cut into one-shot samples",
+  chopBuild:"Cutting one-shots…", chopFail:"Couldn't cut one-shots",
+  chopDone:"Downloaded {n} {w} as {name}", oneshots:["one-shot","one-shots"],
+  jamHint:"You can play several loops — the next ones come in at the top of the bar. <b>Space stops everything.</b>",
   waitDig:"Wait until the dig is finished", needAudio:"Audio files needed", uploading:"Uploading {i} of {n}: {name}", uploadFail:"upload failed",
   rerunWait:"Wait until the dig is finished and drag the record again", rerunning:"Re-running “{t}”: {s}",
   onlyWhat:"{list} only", or:" or ",
@@ -405,9 +414,12 @@ es: {
   emptyTitle:"Aquí aparecerán los discos y los loops", emptyText:"Escribe etiquetas a la izquierda o deja el campo vacío y pulsa «Excavar». Las nuevas excavaciones se añaden abajo.",
   nothingPlaying:"no suena nada", playingN:"loops sonando: {n}", syncRate:"Tempo del primer loop",
   syncTitle:"Los siguientes loops siguen el tempo del primero que encendiste", volume:"Volumen", stopAll:"Parar todo", jamZip:"Descargar jam", jamZipTitle:"ZIP con los loops que suenan: cada uno con el pitch con el que suena en el jam y con su nueva tonalidad y BPM en el nombre",
-  zip:"Descargar todo en ZIP", zipN:"Descargar todo en ZIP ({n})", zipTitle:"Todos los loops en pantalla tal cual, ordenados en carpetas: BPM y, dentro, tonalidad",
+  zip:"Descargar todo", zipN:"Descargar todo ({n})", zipTitle:"Todos los loops en pantalla tal cual, ordenados en carpetas: BPM y, dentro, tonalidad",
   zipBuilding:"Preparando ZIP…", zipFail:"No se pudo crear el ZIP", zipDone:"Descargados {n} {w} en {name}", zipMissing:", archivos no encontrados: {m}",
-  jamHint:"Puedes encender varios loops: los siguientes entran al inicio del compás. Espacio para parar.",
+  chopTitle:"Cortar el loop en samples one-shot (ZIP)", chopAria:"Cortar en samples one-shot",
+  chopBuild:"Cortando one-shots…", chopFail:"No se pudo cortar en one-shots",
+  chopDone:"Descargados {n} {w} como {name}", oneshots:["one-shot","one-shots"],
+  jamHint:"Puedes encender varios loops: los siguientes entran al inicio del compás. <b>Espacio para parar.</b>",
   waitDig:"Espera a que termine la excavación", needAudio:"Hacen falta archivos de audio", uploading:"Subiendo {i} de {n}: {name}", uploadFail:"falló la subida",
   rerunWait:"Espera a que termine la excavación y arrastra el disco otra vez", rerunning:"Reprocesando «{t}»: {s}",
   onlyWhat:"solo {list}", or:" o ",
@@ -452,7 +464,10 @@ function pl(n, key){                 // word form by number: 1 loop, 2 loops (Ru
 }
 function applyLang(){
   document.documentElement.lang = LANG;
-  document.querySelectorAll("[data-i18n]").forEach(e=>e.textContent = t(e.dataset.i18n));
+  document.querySelectorAll("[data-i18n]").forEach(e=>{
+    if(e.dataset.i18n==="jamHint") e.innerHTML = t("jamHint");
+    else e.textContent = t(e.dataset.i18n);
+  });
   document.querySelectorAll("[data-i18n-title]").forEach(e=>e.title = t(e.dataset.i18nTitle));
   document.querySelectorAll("[data-i18n-aria]").forEach(e=>e.setAttribute("aria-label", t(e.dataset.i18nAria)));
   document.querySelectorAll(".langs button").forEach(b=>b.setAttribute("aria-pressed", b.dataset.lang===LANG));
@@ -651,6 +666,7 @@ const ICON_PLAY = '<svg viewBox="0 0 16 16"><path d="M4 2l10 6-10 6z" fill="curr
 const ICON_STOP = '<svg viewBox="0 0 16 16"><rect x="3" y="3" width="10" height="10" fill="currentColor"/></svg>';
 const ICON_TRASH = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2h4l.5 1H14v1.5H2V3h3.5zM3.5 5.5h9l-.7 8.1a1 1 0 0 1-1 .9H5.2a1 1 0 0 1-1-.9z" fill="currentColor"/></svg>';
 const ICON_SAVE = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 2.5h8.6l2.4 2.4v8.6h-11z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M5 2.5v3.2h5V2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="5" y="9" width="6" height="4.5" rx=".5" fill="currentColor"/></svg>';
+const ICON_CHOP = '<svg viewBox="0 0 16 16" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="3.6" cy="3.6" r="1.7"/><circle cx="12.4" cy="3.6" r="1.7"/><path d="M4.9 5.1 8 9l-2.7 4.7M11.1 5.1 8 9l2.7 4.7"/></g></svg>';
 const rendered = {};          // uid -> loop
 const hidden = new Set();     // uids of loops removed from the screen
 const uid = l => l.dig + "/" + l.name;
@@ -767,17 +783,21 @@ function fillLoop(el, l){              // all captions of a loop in the current 
   const sv = el.querySelector(".save"); sv.title = t("saveTitle"); sv.setAttribute("aria-label", t("saveAria"));
   el.querySelector(".wrong").setAttribute("aria-label", t("wrongAria"));
   const tr = el.querySelector(".trash"); tr.title = t("trashTitle"); tr.setAttribute("aria-label", t("trashAria"));
+  const ch = el.querySelector(".chop");
+  if(ch){ ch.title = t("chopTitle"); ch.setAttribute("aria-label", t("chopAria")); }
   updateLoopFlags(l, el);
 }
 function loopRow(l){
   const el = document.createElement("div"); el.className="loop"; el.dataset.uid=uid(l);
   el.style.setProperty("--hue", hue(l.camelot));
+  const drumsOnly = (l.kind || (l.drums ? "drums" : null)) === "drums" && !l.mixed;
+  if(drumsOnly) el.classList.add("drums");
   el.innerHTML = `<button class="play">${ICON_PLAY}</button>
     <div class="lname"><div class="big"><span class="keychip">${esc(l.key)}</span>${l.bpm}</div>
       <div class="small"><button class="copy">${esc(l.name)}</button></div>
       <div class="meta"></div></div>
     <canvas class="wave"></canvas>
-    <div class="acts"><button class="icon wrong dbgonly">👎</button><button class="icon fav">★</button><button class="icon save">${ICON_SAVE}</button><button class="icon trash">${ICON_TRASH}</button></div>`;
+    <div class="acts"><button class="icon wrong dbgonly">👎</button><button class="icon fav">★</button><button class="icon save">${ICON_SAVE}</button><button class="icon trash">${ICON_TRASH}</button>${drumsOnly ? `<button class="icon chop">${ICON_CHOP}</button>` : ""}</div>`;
   el.querySelector(".play").onclick = ()=>toggleLoop(l, el);
   el.querySelector(".wave").onclick = ()=>toggleLoop(l, el);
   el.querySelector(".copy").onclick = ()=>{navigator.clipboard?.writeText(l.name); toast(t("copied",{name:l.name}))};
@@ -803,6 +823,8 @@ function loopRow(l){
   };
   el.ondragend = ()=>{ dragLoop = false; el.classList.remove("dragout"); drop.classList.remove("over"); };
   el.querySelector(".trash").onclick = ()=>trashLoop(l, el);
+  const ch = el.querySelector(".chop");
+  if(ch) ch.onclick = ()=>chopLoop(l, ch);
   el.onmouseenter = ()=>highlight(l); el.onmouseleave = ()=>highlight(null);
   fillLoop(el, l);
   requestAnimationFrame(()=>drawWave(el.querySelector(".wave"), l.peaks, -1));
@@ -829,6 +851,23 @@ async function saveLoop(l){
   const a = document.createElement("a"); a.href = url; a.download = name;
   document.body.append(a); a.click(); a.remove();
   toast(t("downloaded",{name}));
+}
+/* Scissors: cut the loop into one-shot samples — every hit becomes its own WAV,
+   and all of them are downloaded as one ZIP (the server does the transient detection). */
+async function chopLoop(l, btn){
+  btn.disabled = true;
+  toast(t("chopBuild"));
+  try{
+    const r = await fetch("/api/oneshots",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({dig:l.dig, name:l.name})});
+    if(!r.ok){ const e = await r.json().catch(()=>({})); toast(e.error || t("chopFail")); return; }
+    const blob = await r.blob();
+    const name = (/filename="([^"]+)"/.exec(r.headers.get("Content-Disposition")||"")||[])[1] || "oneshots.zip";
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.append(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 60000);
+    const got = +(r.headers.get("X-Loops")||0);
+    toast(t("chopDone",{n:got, w:pl(got,"oneshots"), name}));
+  }catch(e){ toast(t("chopFail")); }
+  finally{ btn.disabled = false; }
 }
 function trashLoop(l, el){
   const id = uid(l);
@@ -1012,7 +1051,6 @@ function stopLoop(id){
   v.el.classList.remove("playing"); v.el.querySelector(".play").innerHTML = ICON_PLAY;
   drawWave(v.el.querySelector(".wave"), v.l.peaks, -1); updateJam();
 }
-$("#stopAll").onclick = ()=>Object.keys(voices).forEach(stopLoop);
 /* "Download jam": the loops playing now, pitched exactly as they play (rate = master BPM / loop BPM),
    in a ZIP named after the master loop; the server renames them to their new key and BPM */
 $("#jamZip").onclick = async ()=>{
