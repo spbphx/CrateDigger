@@ -797,7 +797,7 @@ function loopRow(l){
       <div class="small"><button class="copy">${esc(l.name)}</button></div>
       <div class="meta"></div></div>
     <canvas class="wave"></canvas>
-    <div class="acts"><button class="icon wrong dbgonly">👎</button><button class="icon fav">★</button><button class="icon save">${ICON_SAVE}</button><button class="icon trash">${ICON_TRASH}</button>${drumsOnly ? `<button class="icon chop">${ICON_CHOP}</button>` : ""}</div>`;
+    <div class="acts"><button class="icon wrong dbgonly">👎</button><button class="icon fav">★</button><button class="icon save">${ICON_SAVE}</button>${drumsOnly ? `<button class="icon chop">${ICON_CHOP}</button>` : ""}<button class="icon trash">${ICON_TRASH}</button></div>`;
   el.querySelector(".play").onclick = ()=>toggleLoop(l, el);
   el.querySelector(".wave").onclick = ()=>toggleLoop(l, el);
   el.querySelector(".copy").onclick = ()=>{navigator.clipboard?.writeText(l.name); toast(t("copied",{name:l.name}))};
