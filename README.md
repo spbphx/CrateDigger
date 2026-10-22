@@ -16,6 +16,10 @@ Full manual: [English](README_EN.txt) · [Русский](README.txt) · [Españ
 - Interface in English, Russian and Spanish
 - Debugging mode: purity of every loop and a "wrong match" button that collects the loop and the analyzer's readings for tuning the detectors
 
+## Demonstation
+
+https://github.com/user-attachments/assets/e0e730c3-ff4b-486e-83c7-ce8dab7fef3e
+
 ## Quick start
 
 You don't need to install anything by hand — the start file sets up Python and the libraries inside the program folder on the first launch (1–3 minutes, internet required).
