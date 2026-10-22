@@ -1,7 +1,7 @@
 # Changelog
 
 ## 1.3.3
-- Scissors ✂ button on "drums only" loops: cuts the loop into one-shot samples and downloads them all as one ZIP. The button sits in the loop's action row, next to favorite / save / remove — on "drums only" loops the four buttons are packed tighter so the row keeps the same width as the three buttons of other loops.
+- Scissors ✂ button on "drums only" loops: cuts the loop into one-shot samples and downloads them all as one ZIP. The button sits in the loop's action row, next to favorite / save / remove. All action buttons are the same size (34 px); the four buttons of a "drums only" loop stand with no gap, and the three buttons of other loops are spaced wider so both rows have the same total width.
 - The one-shot ZIP is named `1shots_<key>_<date>_<time>.zip` (e.g. `1shots_Amin_2026-10-22_05-07.zip`).
 - One-shot detection was rebuilt for dense funk breaks: onsets are pooled from three spectral bands plus the full-band envelope (a new hit is often masked in the full envelope by the tail of the previous one, but always rises in its own band — a hat high, a kick low), each candidate must show a real energy step big enough for that band, and every segment is rescanned so hits that were still masked split it. The result is a true one-shot per hit: a loop that used to give 24 samples with several hits inside now gives 32 clean ones (16ths of both bars).
 

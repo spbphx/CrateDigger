@@ -116,11 +116,11 @@ select.ghost{max-width:260px}
 .meta{font-size:12.5px;color:var(--soft);line-height:1.35;margin-top:2px}
 .small button{border:0;background:none;padding:0;color:var(--soft);cursor:pointer;text-decoration:underline dotted;font-size:12.5px}
 canvas.wave{width:100%;height:46px;display:block;cursor:pointer}
-.acts{display:flex;gap:4px}
-/* "drums only" loops have four buttons — they are packed tighter so the row has
-   the same width as the three buttons of the other loops: 4*26+3*2 == 3*34+2*4 */
-.loop.drums .acts{gap:2px}
-.loop.drums .icon{width:26px;height:26px;border-radius:7px;font-size:14px}
+.acts{display:flex;gap:17px}
+/* All loops have equally wide action rows: four 34px buttons with no gap on
+   "drums only" loops equal three 34px buttons with 17px gaps on the others
+   (4*34 == 3*34 + 2*17). */
+.loop.drums .acts{gap:0}
 .icon{width:34px;height:34px;border-radius:8px;border:1px solid transparent;background:none;cursor:pointer;color:var(--soft);font-size:17px}
 .icon:hover{border-color:var(--line);color:var(--ink)}
 .icon.on{color:#C08A00}
