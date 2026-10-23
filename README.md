@@ -16,7 +16,7 @@ Full manual: [English](README_EN.txt) · [Русский](README.txt) · [Españ
 - Interface in English, Russian and Spanish
 - Debugging mode: purity of every loop and a "wrong match" button that collects the loop and the analyzer's readings for tuning the detectors
 
-## Demonstation
+## Demonstration
 
 https://github.com/user-attachments/assets/e0e730c3-ff4b-486e-83c7-ce8dab7fef3e
 
